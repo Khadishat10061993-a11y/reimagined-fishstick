@@ -22,18 +22,31 @@ from telegram.ext import (
 # =========================================================
 
 TOKEN = "8905175157:AAEo3tBv5V1pJGbJwWRoRXojMyj5qaJAxfw"
-ADMIN_ID = 8161017993  # ID администратора
+
+# Сюда поставь Telegram ID администратора
+ADMIN_ID = 8161017993
 
 ADMIN_USERNAME = "@netuzu"
 CHANNEL_URL = "https://t.me/+lyHMe0599OtjYjEy"
 
-logging.basicConfig(level=logging.INFO)
+# Названия фотографий
+START_PHOTO = "Start.jpg.PNG"
+CATALOG_PHOTO = "Katalog.jpg.PNG"
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
 # =========================================================
 # БАЗА ДАННЫХ
 # =========================================================
 
-db = sqlite3.connect("ceko_hub.db", check_same_thread=False)
+db = sqlite3.connect(
+    "ceko_hub.db",
+    check_same_thread=False
+)
+
 cursor = db.cursor()
 
 cursor.execute("""
@@ -58,28 +71,37 @@ db.commit()
 # ВРЕМЕННЫЕ ДАННЫЕ
 # =========================================================
 
-# user_id -> выбранное количество Деф
 purchase_data = {}
 
-# user_id -> выбранный заказ Деф
-def_orders = {}
-
-# message_id администратора -> user_id
 question_messages = {}
 
 # =========================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ПОЛЬЗОВАТЕЛИ
 # =========================================================
 
 def register_user(user):
     cursor.execute(
-        "INSERT OR IGNORE INTO users (user_id, username, balance) VALUES (?, ?, 0)",
-        (user.id, user.username or "без_username")
+        """
+        INSERT OR IGNORE INTO users
+        (user_id, username, balance)
+        VALUES (?, ?, 0)
+        """,
+        (
+            user.id,
+            user.username or "без_username"
+        )
     )
 
     cursor.execute(
-        "UPDATE users SET username=? WHERE user_id=?",
-        (user.username or "без_username", user.id)
+        """
+        UPDATE users
+        SET username=?
+        WHERE user_id=?
+        """,
+        (
+            user.username or "без_username",
+            user.id
+        )
     )
 
     db.commit()
@@ -87,9 +109,14 @@ def register_user(user):
 
 def get_balance(user_id):
     cursor.execute(
-        "SELECT balance FROM users WHERE user_id=?",
+        """
+        SELECT balance
+        FROM users
+        WHERE user_id=?
+        """,
         (user_id,)
     )
+
     result = cursor.fetchone()
 
     if result:
@@ -100,14 +127,27 @@ def get_balance(user_id):
 
 def add_balance(user_id, amount):
     cursor.execute(
-        "UPDATE users SET balance = balance + ? WHERE user_id=?",
-        (amount, user_id)
+        """
+        UPDATE users
+        SET balance = balance + ?
+        WHERE user_id=?
+        """,
+        (
+            amount,
+            user_id
+        )
     )
+
     db.commit()
 
 
+# =========================================================
+# ПРОМОКОДЫ
+# =========================================================
+
 def generate_promo():
     while True:
+
         code = "".join(
             random.choices(
                 string.ascii_uppercase + string.digits,
@@ -116,7 +156,11 @@ def generate_promo():
         )
 
         cursor.execute(
-            "SELECT code FROM promos WHERE code=?",
+            """
+            SELECT code
+            FROM promos
+            WHERE code=?
+            """,
             (code,)
         )
 
@@ -124,23 +168,47 @@ def generate_promo():
             return code
 
 
+# =========================================================
+# КЛАВИАТУРЫ
+# =========================================================
+
 def main_keyboard(user_id):
+
     balance = get_balance(user_id)
 
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🫀 Каталог", callback_data="catalog"),
-            InlineKeyboardButton("🫆 Промокод", callback_data="promo"),
+            InlineKeyboardButton(
+                "🫀 Каталог",
+                callback_data="catalog"
+            ),
+            InlineKeyboardButton(
+                "🫆 Промокод",
+                callback_data="promo"
+            )
         ],
+
         [
-            InlineKeyboardButton("👾 Заказать Деф", callback_data="def_order"),
+            InlineKeyboardButton(
+                "👾 Заказать Деф",
+                callback_data="def_order"
+            )
         ],
+
         [
-            InlineKeyboardButton("💬 Секрет Тгк", callback_data="channel"),
+            InlineKeyboardButton(
+                "💬 Секрет Тгк",
+                callback_data="channel"
+            )
         ],
+
         [
-            InlineKeyboardButton("🔰 Вопрос к Ceko", callback_data="question"),
+            InlineKeyboardButton(
+                "🔰 Вопрос к Ceko",
+                callback_data="question"
+            )
         ],
+
         [
             InlineKeyboardButton(
                 f"💰 Баланс: {balance} Деф",
@@ -151,31 +219,51 @@ def main_keyboard(user_id):
 
 
 def back_keyboard():
+
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ Назад", callback_data="back")]
+        [
+            InlineKeyboardButton(
+                "◀️ Назад",
+                callback_data="back"
+            )
+        ]
     ])
 
 
 def admin_keyboard():
+
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➕ Добавить промо", callback_data="admin_add_promo")
+            InlineKeyboardButton(
+                "➕ Добавить промо",
+                callback_data="admin_add_promo"
+            )
         ],
+
         [
-            InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")
+            InlineKeyboardButton(
+                "📊 Статистика",
+                callback_data="admin_stats"
+            )
         ],
+
         [
-            InlineKeyboardButton("◀️ Назад", callback_data="admin_back")
+            InlineKeyboardButton(
+                "◀️ Назад",
+                callback_data="admin_back"
+            )
         ]
     ])
 
 
 # =========================================================
-# START
+# /START
 # =========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
+
     register_user(user)
 
     text = (
@@ -185,15 +273,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        with open("Start.jpg", "rb") as photo:
+
+        with open(START_PHOTO, "rb") as photo:
+
             await update.message.reply_photo(
                 photo=photo,
                 caption=text,
                 reply_markup=main_keyboard(user.id)
             )
+
     except FileNotFoundError:
+
         await update.message.reply_text(
-            text,
+            "❌ Не найден файл Start.jpg.PNG\n\n"
+            + text,
             reply_markup=main_keyboard(user.id)
         )
 
@@ -203,48 +296,103 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 
 async def catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
+
     await query.answer()
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("1 Деф - 1 Мишка", callback_data="buy_1")],
-        [InlineKeyboardButton("10 Деф - 5 Мишек", callback_data="buy_10")],
-        [InlineKeyboardButton("25 Деф - 10 Мишек", callback_data="buy_25")],
-        [InlineKeyboardButton("50 Деф - 40 Мишек", callback_data="buy_50")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="back")]
+
+        [
+            InlineKeyboardButton(
+                "1 Деф - 1 Мишка",
+                callback_data="buy_1"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "10 Деф - 5 Мишек",
+                callback_data="buy_10"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "25 Деф - 10 Мишек",
+                callback_data="buy_25"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "50 Деф - 40 Мишек",
+                callback_data="buy_50"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "◀️ Назад",
+                callback_data="back"
+            )
+        ]
     ])
 
     text = (
         "🤖 Каталог валюты\n\n"
-        "Действуют скидки — навсегда"
+        "Действуют скидки - навсегда"
     )
 
     try:
+
         await query.message.delete()
 
-        with open("Katalog.jpg", "rb") as photo:
+        with open(CATALOG_PHOTO, "rb") as photo:
+
             await query.message.chat.send_photo(
                 photo=photo,
                 caption=text,
                 reply_markup=keyboard
             )
 
-    except Exception:
+    except FileNotFoundError:
+
         await query.message.edit_text(
-            text,
+            "❌ Не найден файл Katalog.jpg.PNG\n\n"
+            + text,
             reply_markup=keyboard
         )
+
+    except Exception:
+
+        try:
+
+            await query.message.edit_text(
+                text,
+                reply_markup=keyboard
+            )
+
+        except Exception:
+            pass
 
 
 # =========================================================
 # ВЫБОР ТОВАРА
 # =========================================================
 
-async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def select_product(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
 
-    amount = int(query.data.split("_")[1])
+    amount = int(
+        query.data.split("_")[1]
+    )
 
     prices = {
         1: 1,
@@ -261,12 +409,14 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     keyboard = InlineKeyboardMarkup([
+
         [
             InlineKeyboardButton(
                 "✅ Готово",
                 callback_data="payment_done"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "◀️ Назад",
@@ -277,9 +427,9 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         f"Вы выбрали {amount} Деф очков.\n\n"
-        f"Для того чтобы получить их, перейдите в ЛС {ADMIN_USERNAME} "
-        f"и скиньте {bears} Мишек.\n\n"
-        "После оплаты нажмите кнопку ниже."
+        f"Для того чтобы получить их, перейдите в ЛС "
+        f"{ADMIN_USERNAME} и скиньте {bears} Мишек.\n\n"
+        "После этого нажмите на нижнюю кнопку."
     )
 
     await query.message.edit_text(
@@ -289,27 +439,39 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# ПОЛЬЗОВАТЕЛЬ НАЖАЛ ГОТОВО
+# ГОТОВО / ОПЛАТА
 # =========================================================
 
-async def payment_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def payment_done(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
 
     user = query.from_user
+
     data = purchase_data.get(user.id)
 
     if not data:
+
         await query.message.edit_text(
             "❌ Заявка не найдена.",
             reply_markup=back_keyboard()
         )
+
         return
 
     amount = data["def"]
     bears = data["bears"]
 
-    username = f"@{user.username}" if user.username else f"ID: {user.id}"
+    username = (
+        f"@{user.username}"
+        if user.username
+        else "без username"
+    )
 
     await query.message.edit_text(
         "✅ Ваш запрос принят и обрабатывается.\n\n"
@@ -322,11 +484,12 @@ async def payment_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 ID: {user.id}\n"
         f"💰 Деф: {amount}\n"
         f"🧸 Мишек: {bears}\n\n"
-        "Оплата заявлена. Прошу проверить оплату "
-        "и подтвердить получение."
+        "Оплата заявлена.\n"
+        "Прошу проверить оплату и подтвердить получение."
     )
 
     keyboard = InlineKeyboardMarkup([
+
         [
             InlineKeyboardButton(
                 "✅ Подтвердить",
@@ -343,52 +506,74 @@ async def payment_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# ПОДТВЕРЖДЕНИЕ АДМИНОМ
+# ПОДТВЕРЖДЕНИЕ ОПЛАТЫ АДМИНОМ
 # =========================================================
 
-async def confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def confirm_payment(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
 
     if query.from_user.id != ADMIN_ID:
+
         await query.answer(
             "⛔ У вас нет доступа.",
             show_alert=True
         )
+
         return
 
     await query.answer()
 
-    _, user_id, amount = query.data.split("_")
+    parts = query.data.split("_")
 
-    user_id = int(user_id)
-    amount = int(amount)
+    user_id = int(parts[1])
+    amount = int(parts[2])
 
-    add_balance(user_id, amount)
+    add_balance(
+        user_id,
+        amount
+    )
 
     try:
+
         await context.bot.send_message(
             user_id,
+
             f"✅ Администратор проверил оплату.\n\n"
-            f"Вам выдано {amount} Деф очков.\n"
-            f"💰 Новый баланс: {get_balance(user_id)} Деф"
+            f"Вам выдано {amount} Деф очков.\n\n"
+            f"💰 Новый баланс: "
+            f"{get_balance(user_id)} Деф"
         )
+
     except Exception:
         pass
 
     await query.message.edit_text(
-        query.message.text +
-        "\n\n✅ ОПЛАТА ПОДТВЕРЖДЕНА"
+        query.message.text
+        + "\n\n"
+        "✅ ОПЛАТА ПОДТВЕРЖДЕНА"
     )
 
-    purchase_data.pop(user_id, None)
+    purchase_data.pop(
+        user_id,
+        None
+    )
 
 
 # =========================================================
-# ПРОМОКОД
+# ПРОМОКОД - МЕНЮ
 # =========================================================
 
-async def promo_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def promo_menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
 
     context.user_data["waiting_promo"] = True
@@ -400,50 +585,79 @@ async def promo_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def use_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("waiting_promo"):
+# =========================================================
+# ИСПОЛЬЗОВАНИЕ ПРОМО
+# =========================================================
+
+async def use_promo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not context.user_data.get(
+        "waiting_promo"
+    ):
         return
 
-    context.user_data["waiting_promo"] = False
+    context.user_data[
+        "waiting_promo"
+    ] = False
 
     code = update.message.text.strip().upper()
 
     cursor.execute(
-        "SELECT amount, uses_left FROM promos WHERE code=?",
+        """
+        SELECT amount, uses_left
+        FROM promos
+        WHERE code=?
+        """,
         (code,)
     )
 
     promo = cursor.fetchone()
 
     if not promo:
+
         await update.message.reply_text(
             "❌ Промокод не найден.",
             reply_markup=back_keyboard()
         )
+
         return
 
     amount, uses_left = promo
 
     if uses_left <= 0:
+
         await update.message.reply_text(
             "❌ Этот промокод больше недоступен.",
             reply_markup=back_keyboard()
         )
+
         return
 
-    add_balance(update.effective_user.id, amount)
+    add_balance(
+        update.effective_user.id,
+        amount
+    )
 
     cursor.execute(
-        "UPDATE promos SET uses_left = uses_left - 1 WHERE code=?",
+        """
+        UPDATE promos
+        SET uses_left = uses_left - 1
+        WHERE code=?
+        """,
         (code,)
     )
 
     db.commit()
 
     await update.message.reply_text(
-        f"🎉 Промокод успешно активирован!\n\n"
-        f"Вы получили: {amount} Деф очков.\n"
-        f"💰 Баланс: {get_balance(update.effective_user.id)} Деф",
+        "🎉 Промокод успешно активирован!\n\n"
+        f"💰 Вы получили: {amount} Деф очков.\n\n"
+        f"Ваш баланс: "
+        f"{get_balance(update.effective_user.id)} Деф",
+
         reply_markup=back_keyboard()
     )
 
@@ -452,99 +666,24 @@ async def use_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ЗАКАЗАТЬ ДЕФ
 # =========================================================
 
-async def def_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def def_order(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
 
     keyboard = InlineKeyboardMarkup([
+
         [
             InlineKeyboardButton(
                 "1 Деф - 1 Деф Очка",
                 callback_data="order_def_1"
             )
         ],
-        [
-            InlineKeyboardButton("◀️ Назад", callback_data="back")
-        ]
-    ])
 
-    await query.message.edit_text(
-        "👾 Заказать Деф\n\n"
-        "Выбирай пункт:",
-        reply_markup=keyboard
-    )
-
-
-async def order_def(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "✅ Подтвердить заказ",
-                callback_data="confirm_def_order"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "◀️ Назад",
-                callback_data="def_order"
-            )
-        ]
-    ])
-
-    await query.message.edit_text(
-        "👾 Вы выбрали заказ Деф.\n\n"
-        "Подтвердить заказ?",
-        reply_markup=keyboard
-    )
-
-
-async def confirm_def_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user = query.from_user
-    username = f"@{user.username}" if user.username else "без username"
-
-    await query.message.edit_text(
-        "✅ Ваш заказ принят!\n\n"
-        "Администратор скоро свяжется с вами в личных сообщениях."
-    )
-
-    await context.bot.send_message(
-        ADMIN_ID,
-        "👾 НОВЫЙ ЗАКАЗ ДЕФ\n\n"
-        f"👤 Пользователь: {username}\n"
-        f"🆔 ID: {user.id}\n\n"
-        "Прошу перейти к нему в личку.",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "💬 Открыть профиль",
-                    url=f"tg://user?id={user.id}"
-                )
-            ]
-        ])
-    )
-
-
-# =========================================================
-# СЕКРЕТ ТГК
-# =========================================================
-
-async def channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "💬 Перейти в канал",
-                url=CHANNEL_URL
-            )
-        ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
@@ -554,8 +693,129 @@ async def channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     await query.message.edit_text(
+        "👾 Заказать Деф\n\n"
+        "Выбирай пункт:",
+
+        reply_markup=keyboard
+    )
+
+
+async def order_def(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup([
+
+        [
+            InlineKeyboardButton(
+                "✅ Подтвердить заказ",
+                callback_data="confirm_def_order"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "◀️ Назад",
+                callback_data="def_order"
+            )
+        ]
+    ])
+
+    await query.message.edit_text(
+        "👾 Вы выбрали:\n\n"
+        "1 Деф - 1 Деф Очка\n\n"
+        "Подтвердить заказ?",
+
+        reply_markup=keyboard
+    )
+
+
+async def confirm_def_order(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    user = query.from_user
+
+    username = (
+        f"@{user.username}"
+        if user.username
+        else "без username"
+    )
+
+    await query.message.edit_text(
+        "✅ Ваш заказ принят!\n\n"
+        "Администратор скоро свяжется "
+        "с вами в личных сообщениях."
+    )
+
+    await context.bot.send_message(
+
+        ADMIN_ID,
+
+        "👾 НОВЫЙ ЗАКАЗ ДЕФ\n\n"
+        f"👤 Пользователь: {username}\n"
+        f"🆔 ID: {user.id}\n\n"
+        "Прошу перейти к нему в личку.",
+
+        reply_markup=InlineKeyboardMarkup([
+
+            [
+                InlineKeyboardButton(
+                    "💬 Открыть профиль",
+                    url=f"tg://user?id={user.id}"
+                )
+            ]
+
+        ])
+    )
+
+
+# =========================================================
+# СЕКРЕТ ТГК
+# =========================================================
+
+async def channel(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup([
+
+        [
+            InlineKeyboardButton(
+                "💬 Перейти в канал",
+                url=CHANNEL_URL
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "◀️ Назад",
+                callback_data="back"
+            )
+        ]
+    ])
+
+    await query.message.edit_text(
+
         "💬 Секрет Тгк\n\n"
-        "Нажми кнопку ниже, чтобы зайти в Telegram-канал.",
+        "Нажми кнопку ниже, чтобы зайти "
+        "в Telegram-канал.",
+
         reply_markup=keyboard
     )
 
@@ -564,24 +824,43 @@ async def channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ВОПРОС К CEKO
 # =========================================================
 
-async def question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def question(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
 
-    context.user_data["question_mode"] = True
+    context.user_data[
+        "question_mode"
+    ] = True
 
     await query.message.edit_text(
+
         "🔰 Вопрос к Ceko\n\n"
-        "Напишите свой вопрос.\n"
-        "Можно отправить текст, фото, видео, документ, голосовое "
-        "или другой тип сообщения.\n\n"
+        "Напишите свой вопрос.\n\n"
+        "Можно отправить текст, фото, видео, "
+        "документ, голосовое или другое сообщение.\n\n"
         "Администратор ответит вам.",
+
         reply_markup=back_keyboard()
     )
 
 
-async def receive_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("question_mode"):
+# =========================================================
+# ПОЛУЧЕНИЕ ВОПРОСА
+# =========================================================
+
+async def receive_question(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not context.user_data.get(
+        "question_mode"
+    ):
         return
 
     user = update.effective_user
@@ -592,134 +871,206 @@ async def receive_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else f"ID: {user.id}"
     )
 
-    context.user_data["question_mode"] = False
+    context.user_data[
+        "question_mode"
+    ] = False
 
     info = await context.bot.send_message(
+
         ADMIN_ID,
+
         "🔰 НОВЫЙ ВОПРОС\n\n"
         f"👤 От: {username}\n"
         f"🆔 ID: {user.id}\n\n"
-        "Чтобы ответить пользователю — ответьте на это сообщение."
+        "Чтобы ответить пользователю — "
+        "ответьте реплаем на сообщение ниже."
     )
 
-    question_messages[info.message_id] = user.id
+    question_messages[
+        info.message_id
+    ] = user.id
 
-    # Копируем любое сообщение пользователя админу
     try:
+
         copied = await update.message.copy(
             chat_id=ADMIN_ID
         )
 
-        question_messages[copied.message_id] = user.id
+        question_messages[
+            copied.message_id
+        ] = user.id
 
-    except Exception:
-        pass
+    except Exception as e:
+
+        logging.error(
+            f"Ошибка копирования сообщения: {e}"
+        )
 
     await update.message.reply_text(
+
         "✅ Ваш вопрос отправлен администратору.",
+
         reply_markup=back_keyboard()
     )
 
 
 # =========================================================
-# АДМИНСКАЯ ПАНЕЛЬ
+# ПАНЕЛЬ АДМИНА
 # =========================================================
 
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_panel(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("⛔ Доступ запрещён.")
+
+        await update.message.reply_text(
+            "⛔ Доступ запрещён."
+        )
+
         return
 
     await update.message.reply_text(
+
         "🔐 Панель администратора",
+
         reply_markup=admin_keyboard()
     )
 
 
 # =========================================================
-# ДОБАВЛЕНИЕ ПРОМО
+# ДОБАВИТЬ ПРОМО
 # =========================================================
 
-async def admin_add_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_add_promo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
 
     if query.from_user.id != ADMIN_ID:
+
         await query.answer(
             "⛔ Доступ запрещён.",
             show_alert=True
         )
+
         return
 
     await query.answer()
 
-    context.user_data["admin_state"] = "promo_amount"
+    context.user_data[
+        "admin_state"
+    ] = "promo_amount"
 
     await query.message.edit_text(
+
         "➕ Создание промокода\n\n"
         "Шаг 1/2\n\n"
-        "Напишите, сколько Деф очков будет давать промокод."
+        "Напишите, сколько Деф очков "
+        "будет давать промокод."
     )
 
 
-async def admin_promo_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_promo_amount(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if update.effective_user.id != ADMIN_ID:
         return
 
-    if context.user_data.get("admin_state") != "promo_amount":
+    if context.user_data.get(
+        "admin_state"
+    ) != "promo_amount":
         return
 
     try:
-        amount = int(update.message.text)
+
+        amount = int(
+            update.message.text
+        )
 
         if amount <= 0:
             raise ValueError
 
     except ValueError:
+
         await update.message.reply_text(
             "❌ Введите положительное число."
         )
+
         return
 
-    context.user_data["promo_amount"] = amount
-    context.user_data["admin_state"] = "promo_uses"
+    context.user_data[
+        "promo_amount"
+    ] = amount
+
+    context.user_data[
+        "admin_state"
+    ] = "promo_uses"
 
     await update.message.reply_text(
+
         "Шаг 2/2\n\n"
-        "Теперь напишите, сколько раз можно использовать этот промокод."
+        "Напишите, сколько раз можно "
+        "использовать этот промокод."
     )
 
 
-async def admin_promo_uses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_promo_uses(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if update.effective_user.id != ADMIN_ID:
         return
 
-    if context.user_data.get("admin_state") != "promo_uses":
+    if context.user_data.get(
+        "admin_state"
+    ) != "promo_uses":
         return
 
     try:
-        uses = int(update.message.text)
+
+        uses = int(
+            update.message.text
+        )
 
         if uses <= 0:
             raise ValueError
 
     except ValueError:
+
         await update.message.reply_text(
             "❌ Введите положительное число."
         )
+
         return
 
-    amount = context.user_data["promo_amount"]
+    amount = context.user_data[
+        "promo_amount"
+    ]
 
-    context.user_data["promo_uses"] = uses
-    context.user_data["admin_state"] = "promo_confirm"
+    context.user_data[
+        "promo_uses"
+    ] = uses
+
+    context.user_data[
+        "admin_state"
+    ] = "promo_confirm"
 
     keyboard = InlineKeyboardMarkup([
+
         [
             InlineKeyboardButton(
                 "✅ Создать",
                 callback_data="create_promo"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "❌ Отмена",
@@ -729,40 +1080,65 @@ async def admin_promo_uses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     await update.message.reply_text(
+
         "📋 Проверьте данные:\n\n"
         f"💰 Деф очков: {amount}\n"
-        f"👥 Количество использований: {uses}\n\n"
+        f"👥 Использований: {uses}\n\n"
         "Создать промокод?",
+
         reply_markup=keyboard
     )
 
 
-async def create_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def create_promo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
 
     if query.from_user.id != ADMIN_ID:
+
         await query.answer(
             "⛔ Доступ запрещён.",
             show_alert=True
         )
+
         return
 
     await query.answer()
 
-    amount = context.user_data.get("promo_amount")
-    uses = context.user_data.get("promo_uses")
+    amount = context.user_data.get(
+        "promo_amount"
+    )
+
+    uses = context.user_data.get(
+        "promo_uses"
+    )
 
     if not amount or not uses:
+
         await query.message.edit_text(
-            "❌ Данные создания промокода потеряны."
+            "❌ Данные промокода потеряны."
         )
+
         return
 
     code = generate_promo()
 
     cursor.execute(
-        "INSERT INTO promos (code, amount, uses_left) VALUES (?, ?, ?)",
-        (code, amount, uses)
+
+        """
+        INSERT INTO promos
+        (code, amount, uses_left)
+        VALUES (?, ?, ?)
+        """,
+
+        (
+            code,
+            amount,
+            uses
+        )
     )
 
     db.commit()
@@ -770,12 +1146,12 @@ async def create_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
     await query.message.edit_text(
+
         "✅ Промокод создан!\n\n"
-        f"🎟 Промокод: `{code}`\n"
+        f"🎟 Промокод: {code}\n"
         f"💰 Деф очков: {amount}\n"
-        f"👥 Использований: {uses}\n\n"
-        "Отправьте этот код пользователям.",
-        parse_mode="Markdown",
+        f"👥 Использований: {uses}",
+
         reply_markup=admin_keyboard()
     )
 
@@ -784,55 +1160,83 @@ async def create_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # СТАТИСТИКА
 # =========================================================
 
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_stats(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
 
     if query.from_user.id != ADMIN_ID:
+
         await query.answer(
             "⛔ Доступ запрещён.",
             show_alert=True
         )
+
         return
 
     await query.answer()
 
-    cursor.execute("SELECT COUNT(*) FROM users")
+    cursor.execute(
+        "SELECT COUNT(*) FROM users"
+    )
+
     users = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM promos")
+    cursor.execute(
+        "SELECT COUNT(*) FROM promos"
+    )
+
     promos = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COALESCE(SUM(balance), 0) FROM users")
+    cursor.execute(
+        "SELECT COALESCE(SUM(balance), 0) FROM users"
+    )
+
     total_balance = cursor.fetchone()[0]
 
     await query.message.edit_text(
+
         "📊 Статистика\n\n"
         f"👥 Пользователей: {users}\n"
         f"🎟 Промокодов: {promos}\n"
-        f"💰 Всего Деф на балансах: {total_balance}",
+        f"💰 Деф на балансах: {total_balance}",
+
         reply_markup=admin_keyboard()
     )
 
 
 # =========================================================
-# ОТВЕТ АДМИНА НА ВОПРОС
+# ОТВЕТ АДМИНА
 # =========================================================
 
-async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_reply(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if update.effective_user.id != ADMIN_ID:
         return
 
     if not update.message.reply_to_message:
         return
 
-    replied_id = update.message.reply_to_message.message_id
+    replied_id = (
+        update.message
+        .reply_to_message
+        .message_id
+    )
 
-    user_id = question_messages.get(replied_id)
+    user_id = question_messages.get(
+        replied_id
+    )
 
     if not user_id:
         return
 
     try:
+
         await update.message.copy(
             chat_id=user_id
         )
@@ -842,6 +1246,7 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
+
         await update.message.reply_text(
             f"❌ Не удалось отправить ответ: {e}"
         )
@@ -851,16 +1256,25 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # НАЗАД
 # =========================================================
 
-async def back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def back(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
 
     user = query.from_user
 
+    context.user_data.clear()
+
     await query.message.edit_text(
+
         "🔰 Ceko Hub Приветствует\n\n"
         "Для того чтобы продолжить нажмите на кнопки\n\n"
         f"Баланс: {get_balance(user.id)} Деф",
+
         reply_markup=main_keyboard(user.id)
     )
 
@@ -869,86 +1283,234 @@ async def back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ОБРАБОТКА КНОПОК
 # =========================================================
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buttons(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     data = query.data
 
     if data == "catalog":
-        await catalog(update, context)
+
+        await catalog(
+            update,
+            context
+        )
 
     elif data.startswith("buy_"):
-        await select_product(update, context)
+
+        await select_product(
+            update,
+            context
+        )
 
     elif data == "payment_done":
-        await payment_done(update, context)
+
+        await payment_done(
+            update,
+            context
+        )
 
     elif data.startswith("confirm_"):
-        await confirm_payment(update, context)
+
+        await confirm_payment(
+            update,
+            context
+        )
 
     elif data == "promo":
-        await promo_menu(update, context)
+
+        await promo_menu(
+            update,
+            context
+        )
 
     elif data == "def_order":
-        await def_order(update, context)
+
+        await def_order(
+            update,
+            context
+        )
 
     elif data == "order_def_1":
-        await order_def(update, context)
+
+        await order_def(
+            update,
+            context
+        )
 
     elif data == "confirm_def_order":
-        await confirm_def_order(update, context)
+
+        await confirm_def_order(
+            update,
+            context
+        )
 
     elif data == "channel":
-        await channel(update, context)
+
+        await channel(
+            update,
+            context
+        )
 
     elif data == "question":
-        await question(update, context)
+
+        await question(
+            update,
+            context
+        )
 
     elif data == "back":
-        await back(update, context)
+
+        await back(
+            update,
+            context
+        )
+
+    elif data == "balance":
+
+        await query.answer(
+            f"Ваш баланс: "
+            f"{get_balance(query.from_user.id)} Деф",
+            show_alert=True
+        )
 
     elif data == "admin_add_promo":
-        await admin_add_promo(update, context)
+
+        await admin_add_promo(
+            update,
+            context
+        )
 
     elif data == "create_promo":
-        await create_promo(update, context)
+
+        await create_promo(
+            update,
+            context
+        )
 
     elif data == "admin_stats":
-        await admin_stats(update, context)
+
+        await admin_stats(
+            update,
+            context
+        )
 
     elif data == "admin_panel":
+
         if query.from_user.id == ADMIN_ID:
+
             await query.message.edit_text(
                 "🔐 Панель администратора",
                 reply_markup=admin_keyboard()
             )
 
     elif data == "admin_back":
-        await back(update, context)
 
-    elif data == "balance":
-        await query.answer(
-            f"Ваш баланс: {get_balance(query.from_user.id)} Деф",
-            show_alert=True
+        await back(
+            update,
+            context
         )
 
 
 # =========================================================
-# ЗАПУСК
+# ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ
+# =========================================================
+
+async def text_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    user_id = update.effective_user.id
+
+    # Пользователь вводит промокод
+    if context.user_data.get(
+        "waiting_promo"
+    ):
+
+        await use_promo(
+            update,
+            context
+        )
+
+        return
+
+    # Админ создаёт промокод
+    if user_id == ADMIN_ID:
+
+        state = context.user_data.get(
+            "admin_state"
+        )
+
+        if state == "promo_amount":
+
+            await admin_promo_amount(
+                update,
+                context
+            )
+
+            return
+
+        if state == "promo_uses":
+
+            await admin_promo_uses(
+                update,
+                context
+            )
+
+            return
+
+    # Вопрос пользователя
+    if context.user_data.get(
+        "question_mode"
+    ):
+
+        await receive_question(
+            update,
+            context
+        )
+
+
+# =========================================================
+# MAIN
 # =========================================================
 
 def main():
-    app = Application.builder().token(TOKEN).build()
 
-    # Основные команды
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("panel", admin_panel))
+    app = (
+        Application
+        .builder()
+        .token(TOKEN)
+        .build()
+    )
+
+    # /start
+    app.add_handler(
+        CommandHandler(
+            "start",
+            start
+        )
+    )
+
+    # /panel
+    app.add_handler(
+        CommandHandler(
+            "panel",
+            admin_panel
+        )
+    )
 
     # Кнопки
     app.add_handler(
-        CallbackQueryHandler(buttons)
+        CallbackQueryHandler(
+            buttons
+        )
     )
 
-    # Ответы админа на сообщения
+    # Ответ администратора реплаем
     app.add_handler(
         MessageHandler(
             filters.REPLY & filters.ALL,
@@ -957,45 +1519,25 @@ def main():
         group=1
     )
 
-    # Промокод
+    # Любые сообщения
     app.add_handler(
         MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            use_promo
+            filters.ALL & ~filters.COMMAND,
+            text_handler
         ),
         group=2
     )
 
-    # Админ создание промокода
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            admin_promo_amount
-        ),
-        group=3
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            admin_promo_uses
-        ),
-        group=4
-    )
-
-    # Вопросы пользователей — любые типы сообщений
-    app.add_handler(
-        MessageHandler(
-            filters.ALL & ~filters.COMMAND,
-            receive_question
-        ),
-        group=5
-    )
-
-    print("Ceko Hub запущен!")
+    print("================================")
+    print("       CEKO HUB ЗАПУЩЕН")
+    print("================================")
 
     app.run_polling()
 
+
+# =========================================================
+# ЗАПУСК
+# =========================================================
 
 if __name__ == "__main__":
     main()
