@@ -1,10 +1,13 @@
-import os
-import re
+# bot.py
+# Ceko Hub
+# Python 3.10+
+# pip install python-telegram-bot
+
+import sqlite3
 import random
 import string
-import sqlite3
+import re
 import time
-import logging
 
 from telegram import (
     Update,
@@ -19,2466 +22,1837 @@ from telegram.ext import (
     CallbackQueryHandler,
     MessageHandler,
     PreCheckoutQueryHandler,
-    filters,
     ContextTypes,
+    filters,
 )
 
 # ============================================================
-# CEKO HUB — FULL BOT
+# НАСТРОЙКИ
 # ============================================================
 
 TOKEN = "8905175157:AAEXGCH_Cx2On1uH0JMuBoEuxDB3I2F52N0"
 ADMIN_ID = 8161017993
 
-ADMIN_USERNAME = "@netuzu"
-CHANNEL_URL = "https://t.me/+lyHMe0599OtjYjEy"
+CHANNEL_LINK = "https://t.me/+lyHMe0599OtjYjEy"
 
-START_PHOTO = "Start.jpg.PNG"
-CATALOG_PHOTO = "Katalog.jpg.PNG"
-JERRY_VIDEO = "Jerry.MOV"
+DB = "ceko.db"
 
-DB_FILE = "ceko.db"
+# ============================================================
+# ПОДАРКИ-ДЕФ
+# ============================================================
 
-PENSION_COOLDOWN = 120
+GIFTS = {
+    "gift_1": {
+        "name": "🎁 1 Деф",
+        "def": 1,
+        "stars": 1,
+    },
+    "gift_10": {
+        "name": "🎁 10 Деф",
+        "def": 10,
+        "stars": 5,
+    },
+    "gift_25": {
+        "name": "🎁 25 Деф",
+        "def": 25,
+        "stars": 10,
+    },
+    "gift_50": {
+        "name": "🎁 50 Деф",
+        "def": 50,
+        "stars": 40,
+    },
+    "gift_100": {
+        "name": "🎁 100 Деф",
+        "def": 100,
+        "stars": 75,
+    },
+}
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("CEKO")
+# ============================================================
+# СОСТОЯНИЯ
+# ============================================================
+
+states = {}
+cooldowns = {}
+broken_bases = set()
 
 # ============================================================
 # DATABASE
 # ============================================================
 
-db = sqlite3.connect(DB_FILE, check_same_thread=False)
-db.row_factory = sqlite3.Row
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT DEFAULT '',
-    first_name TEXT DEFAULT '',
-    balance INTEGER DEFAULT 0,
-    pension REAL DEFAULT 0,
-    pension_until INTEGER DEFAULT 0,
-    broken INTEGER DEFAULT 0
-)
-""")
+def db():
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    return con
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS promos (
-    code TEXT PRIMARY KEY,
-    amount INTEGER NOT NULL,
-    uses INTEGER NOT NULL
-)
-""")
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS gift_promos (
-    code TEXT PRIMARY KEY,
-    gift_id TEXT NOT NULL,
-    gift_stars INTEGER NOT NULL,
-    uses INTEGER NOT NULL
-)
-""")
+def init_db():
+    con = db()
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-)
-""")
+    con.executescript("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        first_name TEXT,
+        balance INTEGER DEFAULT 0,
+        pension REAL DEFAULT 0.1,
+        started INTEGER DEFAULT 1
+    );
 
-db.commit()
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        buyer_id INTEGER,
+        receiver_id INTEGER,
+        receiver_username TEXT,
+        item TEXT,
+        def_amount INTEGER,
+        stars INTEGER,
+        status TEXT,
+        payload TEXT,
+        charge_id TEXT,
+        created INTEGER
+    );
 
-DEFAULT_RULES = """📜 ПРАВИЛА ЧАТА CEKO
+    CREATE TABLE IF NOT EXISTS promos (
+        code TEXT PRIMARY KEY,
+        reward INTEGER,
+        uses_left INTEGER,
+        active INTEGER DEFAULT 1
+    );
 
-1. Не пиарить чаты или каналы.
-2. Не оскать родню.
-3. Не писать «ыыы», «докс», «сват» и подобное.
-4. Не нарушать спокойствие участников чата.
-5. Уважайте других участников чата."""
+    CREATE TABLE IF NOT EXISTS gift_promos (
+        code TEXT PRIMARY KEY,
+        gift_key TEXT,
+        uses_left INTEGER,
+        active INTEGER DEFAULT 1
+    );
 
-db.execute(
-    "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
-    ("rules", DEFAULT_RULES),
-)
-db.commit()
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    );
+    """)
+
+    if not con.execute(
+        "SELECT 1 FROM settings WHERE key='rules'"
+    ).fetchone():
+
+        con.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?)",
+            (
+                "rules",
+                """📜 Правила Ceko
+
+• Не пиарить чаты или каналы.
+• Не оскать родню.
+• Не писать «докс», «сват» и подобное.
+• Не отправлять рекламу.
+• Не нарушать правила чата.""",
+            ),
+        )
+
+    con.commit()
+    con.close()
+
+
+init_db()
 
 # ============================================================
-# RUNTIME STATES
+# ПОЛЬЗОВАТЕЛИ
 # ============================================================
 
-user_states = {}
-user_data = {}
-admin_data = {}
 
-question_users = {}
+def register(user):
+    con = db()
 
-# ============================================================
-# USERS
-# ============================================================
-
-def ensure_user(user):
-    if not user:
-        return
-
-    db.execute(
+    con.execute(
         """
-        INSERT OR IGNORE INTO users
-        (user_id, username, first_name, balance, pension, pension_until, broken)
-        VALUES (?, ?, ?, 0, 0, 0, 0)
+        INSERT INTO users
+        (user_id,username,first_name,balance,pension,started)
+        VALUES (?,?,?,?,?,1)
+        ON CONFLICT(user_id) DO UPDATE SET
+        username=excluded.username,
+        first_name=excluded.first_name,
+        started=1
         """,
-        (user.id, user.username or "", user.first_name or ""),
+        (
+            user.id,
+            user.username or "",
+            user.first_name or "",
+            0,
+            0.1,
+        ),
     )
 
-    db.execute(
-        """
-        UPDATE users
-        SET username=?, first_name=?
-        WHERE user_id=?
-        """,
-        (user.username or "", user.first_name or "", user.id),
-    )
-
-    db.commit()
+    con.commit()
+    con.close()
 
 
 def get_balance(user_id):
-    row = db.execute(
+    con = db()
+
+    row = con.execute(
         "SELECT balance FROM users WHERE user_id=?",
         (user_id,),
     ).fetchone()
-    return int(row["balance"]) if row else 0
+
+    con.close()
+
+    return row["balance"] if row else 0
 
 
-def add_balance(user_id, amount):
-    db.execute(
-        "UPDATE users SET balance=balance+? WHERE user_id=?",
+def add_def(user_id, amount):
+    con = db()
+
+    con.execute(
+        """
+        UPDATE users
+        SET balance=balance+?
+        WHERE user_id=?
+        """,
         (amount, user_id),
     )
-    db.commit()
+
+    con.commit()
+    con.close()
 
 
-def take_balance(user_id, amount):
-    cur = db.execute(
+def remove_def(user_id, amount):
+    con = db()
+
+    row = con.execute(
+        "SELECT balance FROM users WHERE user_id=?",
+        (user_id,),
+    ).fetchone()
+
+    if not row or row["balance"] < amount:
+        con.close()
+        return False
+
+    con.execute(
         """
         UPDATE users
         SET balance=balance-?
-        WHERE user_id=? AND balance>=?
+        WHERE user_id=?
         """,
-        (amount, user_id, amount),
+        (amount, user_id),
     )
-    db.commit()
-    return cur.rowcount == 1
+
+    con.commit()
+    con.close()
+
+    return True
 
 
 def find_user_by_username(username):
-    username = username.strip().lstrip("@").lower()
+    username = username.lower().replace("@", "")
 
-    row = db.execute(
+    con = db()
+
+    row = con.execute(
         """
-        SELECT user_id, username, first_name
+        SELECT *
         FROM users
         WHERE lower(username)=?
         """,
         (username,),
     ).fetchone()
 
+    con.close()
+
     return row
 
 
-def user_label(user):
+def display_name(user):
     if user.username:
-        return "@" + user.username
-    return user.first_name or f"ID {user.id}"
+        return f"@{user.username}"
 
+    return user.first_name or str(user.id)
 
-def mention(user):
-    name = user.first_name or "Пользователь"
-    if user.username:
-        return "@" + user.username
-    return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 # ============================================================
-# RULES
+# КЛАВИАТУРЫ
 # ============================================================
 
-def get_rules():
-    row = db.execute(
-        "SELECT value FROM settings WHERE key='rules'"
-    ).fetchone()
-    return row["value"] if row else DEFAULT_RULES
 
-
-def set_rules(text):
-    db.execute(
-        "INSERT OR REPLACE INTO settings(key, value) VALUES ('rules', ?)",
-        (text,),
-    )
-    db.commit()
-
-# ============================================================
-# MAIN KEYBOARD
-# ============================================================
-
-def main_keyboard(user_id):
-    rows = [
+def main_menu():
+    return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🫀 Каталог", callback_data="CATALOG"),
-            InlineKeyboardButton("🫆 Промокод", callback_data="PROMO"),
-        ],
-        [
-            InlineKeyboardButton("👾 Заказать Деф", callback_data="ORDER"),
-        ],
-        [
-            InlineKeyboardButton("🎁 Подарок", callback_data="GIFTS"),
-        ],
-        [
-            InlineKeyboardButton("💬 Секрет Тгк", callback_data="CHANNEL"),
-        ],
-        [
-            InlineKeyboardButton("🔰 Вопрос к Ceko", callback_data="QUESTION"),
+            InlineKeyboardButton(
+                "🫀 Каталог",
+                callback_data="catalog"
+            )
         ],
         [
             InlineKeyboardButton(
-                f"💰 Баланс: {get_balance(user_id)}",
-                callback_data="BALANCE",
-            ),
+                "🫆 Промокод",
+                callback_data="promo"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "👾 Заказать Деф",
+                callback_data="def_order"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🎁 Подарок",
+                callback_data="gift"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "💬 Секрет ТГК",
+                url=CHANNEL_LINK
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔰 Вопрос к Ceko",
+                callback_data="question"
+            )
+        ],
+    ])
+
+
+def back():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "↩️ Назад",
+                callback_data="main"
+            )
+        ]
+    ])
+
+
+# ============================================================
+# START
+# ============================================================
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+
+    register(user)
+
+    await update.message.reply_text(
+        "🔰 Ceko Hub Приветствует\n\n"
+        "Для того чтобы продолжить нажмите на кнопки.\n\n"
+        f"Баланс: {get_balance(user.id)} Деф",
+        reply_markup=main_menu()
+    )
+
+
+# ============================================================
+# КАТАЛОГ
+# ============================================================
+
+
+async def catalog(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "1 Деф — 1 ⭐",
+                callback_data="catalog_1"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "10 Деф — 5 ⭐",
+                callback_data="catalog_10"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "25 Деф — 10 ⭐",
+                callback_data="catalog_25"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "50 Деф — 40 ⭐",
+                callback_data="catalog_50"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↩️ Назад",
+                callback_data="main"
+            )
         ],
     ]
 
-    if user_id == ADMIN_ID:
-        rows.append([
+    await q.edit_message_text(
+        "🤖 Каталог валюты\n\n"
+        "Действуют скидки — навсегда.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# ============================================================
+# ПОКУПКА ДЕФ
+# ============================================================
+
+
+async def catalog_product(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    amount = int(q.data.split("_")[1])
+
+    prices = {
+        1: 1,
+        10: 5,
+        25: 10,
+        50: 40,
+    }
+
+    stars = prices[amount]
+
+    payload = f"self:{amount}:{q.from_user.id}:{int(time.time())}"
+
+    await context.bot.send_invoice(
+        chat_id=q.from_user.id,
+        title=f"{amount} Деф",
+        description=f"Пополнение баланса на {amount} Деф",
+        payload=payload,
+        provider_token="",
+        currency="XTR",
+        prices=[
+            LabeledPrice(
+                f"{amount} Деф",
+                stars
+            )
+        ],
+        start_parameter="ceko-def"
+    )
+
+
+# ============================================================
+# ПОДАРОК
+# ============================================================
+
+
+async def gift_menu(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    keyboard = [
+        [
             InlineKeyboardButton(
-                "🔐 Панель администратора",
-                callback_data="ADMIN",
+                "👤 Подарить себе",
+                callback_data="gift_self"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "👥 Подарить другу",
+                callback_data="gift_friend"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↩️ Назад",
+                callback_data="main"
+            )
+        ],
+    ]
+
+    await q.edit_message_text(
+        "🎁 Подарок\n\n"
+        "Выберите, кому подарить Деф:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def gift_self(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    keyboard = []
+
+    for key, item in GIFTS.items():
+
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{item['name']} — {item['stars']} ⭐",
+                callback_data=f"giftself:{key}"
             )
         ])
 
-    return InlineKeyboardMarkup(rows)
-
-
-def back_keyboard(target="BACK"):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ Назад", callback_data=target)]
+    keyboard.append([
+        InlineKeyboardButton(
+            "↩️ Назад",
+            callback_data="gift"
+        )
     ])
 
-
-async def safe_edit(query, text, keyboard=None):
-    try:
-        await query.edit_message_text(
-            text=text,
-            reply_markup=keyboard,
-        )
-        return
-    except Exception:
-        pass
-
-    try:
-        await query.message.reply_text(
-            text=text,
-            reply_markup=keyboard,
-        )
-    except Exception:
-        pass
-
-# ============================================================
-# START / MAIN MENU
-# ============================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not user:
-        return
-
-    ensure_user(user)
-    user_states.pop(user.id, None)
-    user_data.pop(user.id, None)
-
-    text = (
-        "🔰 Ceko Hub Приветствует\n\n"
-        "для того чтобы продолжить нажмите на кнопки\n\n"
-        f"Баланс: {get_balance(user.id)} Деф"
-    )
-
-    if os.path.isfile(START_PHOTO):
-        with open(START_PHOTO, "rb") as photo:
-            await update.message.reply_photo(
-                photo=photo,
-                caption=text,
-                reply_markup=main_keyboard(user.id),
-            )
-    else:
-        await update.message.reply_text(
-            text,
-            reply_markup=main_keyboard(user.id),
-        )
-
-
-async def main_menu(query):
-    user = query.from_user
-    ensure_user(user)
-
-    user_states.pop(user.id, None)
-    user_data.pop(user.id, None)
-
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-
-    text = (
-        "🔰 Ceko Hub Приветствует\n\n"
-        "для того чтобы продолжить нажмите на кнопки\n\n"
-        f"Баланс: {get_balance(user.id)} Деф"
-    )
-
-    if os.path.isfile(START_PHOTO):
-        with open(START_PHOTO, "rb") as photo:
-            await query.message.chat.send_photo(
-                photo=photo,
-                caption=text,
-                reply_markup=main_keyboard(user.id),
-            )
-    else:
-        await query.message.chat.send_message(
-            text=text,
-            reply_markup=main_keyboard(user.id),
-        )
-
-# ============================================================
-# CATALOG / DEF
-# ============================================================
-
-async def catalog(query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("1 Деф - 1 Мишка", callback_data="PRODUCT|1|1")],
-        [InlineKeyboardButton("10 Деф - 5 Мишек", callback_data="PRODUCT|10|5")],
-        [InlineKeyboardButton("25 Деф - 10 Мишек", callback_data="PRODUCT|25|10")],
-        [InlineKeyboardButton("50 Деф - 40 Мишек", callback_data="PRODUCT|50|40")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="BACK")],
-    ])
-
-    text = "🤖 Каталог валюты\n\nДействуют скидки - навсегда"
-
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-
-    if os.path.isfile(CATALOG_PHOTO):
-        with open(CATALOG_PHOTO, "rb") as photo:
-            await query.message.chat.send_photo(
-                photo=photo,
-                caption=text,
-                reply_markup=keyboard,
-            )
-    else:
-        await query.message.chat.send_message(
-            text=text,
-            reply_markup=keyboard,
-        )
-
-
-async def product(query, amount, bears):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "✅ Готово",
-            callback_data=f"PAY|{amount}|{bears}",
-        )],
-        [InlineKeyboardButton("◀️ Назад", callback_data="CATALOG")],
-    ])
-
-    await safe_edit(
-        query,
-        (
-            f"Вы выбрали {amount} Деф очков.\n\n"
-            f"Для того чтобы получить их перейдите в ЛС "
-            f"{ADMIN_USERNAME} и скиньте {bears} Мишек.\n\n"
-            "После этого нажмите кнопку «Готово»."
-        ),
-        keyboard,
+    await q.edit_message_text(
+        "🎁 Выберите подарок:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-async def payment(query, context, amount, bears):
-    user = query.from_user
-    ensure_user(user)
+async def gift_friend(update, context):
 
-    await safe_edit(
-        query,
-        "✅ Ваш запрос принят и обрабатывается.\n\nПодождите несколько минут.",
-    )
+    q = update.callback_query
+    await q.answer()
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "✅ Подтвердить",
-            callback_data=f"CONFIRM|{user.id}|{amount}",
-        )]
-    ])
+    states[q.from_user.id] = "gift_friend_username"
 
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            "🆕 НОВАЯ ЗАЯВКА\n\n"
-            f"👤 {user_label(user)}\n"
-            f"🆔 ID: {user.id}\n"
-            f"💰 Деф: {amount}\n"
-            f"🧸 Мишек: {bears}\n\n"
-            "Проверь оплату."
-        ),
-        reply_markup=keyboard,
+    await q.edit_message_text(
+        "👥 Введите username друга.\n\n"
+        "Например:\n"
+        "@username\n\n"
+        "Друг должен хотя бы один раз "
+        "запустить этого бота."
     )
 
 
-async def confirm_payment(query, context, user_id, amount):
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("⛔ Только администратор.", show_alert=True)
-        return
+async def gift_self_selected(update, context):
 
-    add_balance(user_id, amount)
+    q = update.callback_query
+    await q.answer()
 
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=(
-            "✅ Администратор проверил оплату и выдал вам Деф Очки.\n\n"
-            f"➕ Получено: {amount} Деф\n"
-            f"💰 Баланс: {get_balance(user_id)} Деф"
-        ),
-    )
+    key = q.data.split(":", 1)[1]
 
-    try:
-        await query.edit_message_text(
-            query.message.text + "\n\n✅ ПОДТВЕРЖДЕНО"
-        )
-    except Exception:
-        pass
-
-# ============================================================
-# DEF PROMO
-# ============================================================
-
-async def promo(query):
-    user_states[query.from_user.id] = "PROMO"
-    await safe_edit(
-        query,
-        "🫆 Промокод\n\nОтправьте промокод сообщением:",
-        back_keyboard(),
-    )
-
-
-def generate_code():
-    while True:
-        code = "".join(
-            random.choices(
-                string.ascii_uppercase + string.digits,
-                k=10,
-            )
-        )
-        exists1 = db.execute(
-            "SELECT 1 FROM promos WHERE code=?",
-            (code,),
-        ).fetchone()
-        exists2 = db.execute(
-            "SELECT 1 FROM gift_promos WHERE code=?",
-            (code,),
-        ).fetchone()
-        if not exists1 and not exists2:
-            return code
-
-
-async def check_def_promo(update):
-    user = update.effective_user
-    code = update.message.text.strip().upper()
-
-    row = db.execute(
-        "SELECT amount, uses FROM promos WHERE code=?",
-        (code,),
-    ).fetchone()
-
-    if not row:
-        await update.message.reply_text(
-            "❌ Промокод не найден.",
-            reply_markup=back_keyboard(),
-        )
-        return
-
-    if row["uses"] <= 0:
-        await update.message.reply_text(
-            "❌ Промокод больше недоступен.",
-            reply_markup=back_keyboard(),
-        )
-        return
-
-    add_balance(user.id, row["amount"])
-
-    db.execute(
-        "UPDATE promos SET uses=uses-1 WHERE code=?",
-        (code,),
-    )
-    db.commit()
-
-    user_states.pop(user.id, None)
-
-    await update.message.reply_text(
-        (
-            "🎉 Промокод активирован!\n\n"
-            f"➕ Получено: {row['amount']} Деф\n"
-            f"💰 Баланс: {get_balance(user.id)} Деф"
-        ),
-        reply_markup=back_keyboard(),
-    )
-
-# ============================================================
-# ORDER DEF
-# ============================================================
-
-async def order(query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "1 Деф - 1 Деф Очка",
-            callback_data="ORDER_ONE",
-        )],
-        [InlineKeyboardButton("◀️ Назад", callback_data="BACK")],
-    ])
-
-    await safe_edit(
-        query,
-        "👾 Заказать Деф\n\nВыбирай пункт:",
-        keyboard,
-    )
-
-
-async def order_one(query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "✅ Подтвердить",
-            callback_data="ORDER_CONFIRM",
-        )],
-        [InlineKeyboardButton("◀️ Назад", callback_data="ORDER")],
-    ])
-
-    await safe_edit(
-        query,
-        (
-            "👾 Вы выбрали:\n\n"
-            "1 Деф - 1 Деф Очка\n\n"
-            "⚠️ После подтверждения 1 Деф будет списан с баланса.\n\n"
-            "Подтвердить?"
-        ),
-        keyboard,
-    )
-
-
-async def order_confirm(query, context):
-    user = query.from_user
-    ensure_user(user)
-
-    if not take_balance(user.id, 1):
-        await safe_edit(
-            query,
-            "❌ Недостаточно Деф Очков.\n\nДля заказа нужен минимум 1 Деф.",
-            back_keyboard(),
-        )
-        return
-
-    await safe_edit(
-        query,
-        (
-            "✅ Заказ принят!\n\n"
-            "1 Деф списан с баланса.\n"
-            "Администратор получил заявку.\n\n"
-            f"💰 Осталось: {get_balance(user.id)} Деф"
-        ),
-    )
-
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            "👾 НОВЫЙ ЗАКАЗ ДЕФ\n\n"
-            f"👤 {user_label(user)}\n"
-            f"🆔 {user.id}\n\n"
-            "📦 Заказ: 1 Деф\n"
-            "💸 Списано: 1 Деф\n\n"
-            "Прошу перейти к пользователю."
-        ),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                "💬 Профиль",
-                url=f"tg://user?id={user.id}",
-            )]
-        ]),
-    )
-
-# ============================================================
-# CHANNEL / QUESTION
-# ============================================================
-
-async def channel(query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Открыть канал", url=CHANNEL_URL)],
-        [InlineKeyboardButton("◀️ Назад", callback_data="BACK")],
-    ])
-    await safe_edit(
-        query,
-        "💬 Секрет Тгк\n\nНажмите кнопку ниже:",
-        keyboard,
-    )
-
-
-async def question(query):
-    user_states[query.from_user.id] = "QUESTION"
-    await safe_edit(
-        query,
-        (
-            "🔰 Вопрос к Ceko\n\n"
-            "Отправьте сообщение любого типа.\n\n"
-            "Администратор сможет ответить вам."
-        ),
-        back_keyboard(),
-    )
-
-
-async def receive_question(update, context):
-    user = update.effective_user
-
-    try:
-        info = await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                "🔰 НОВЫЙ ВОПРОС\n\n"
-                f"👤 {user_label(user)}\n"
-                f"🆔 {user.id}\n\n"
-                "Ответьте реплаем на сообщение."
-            ),
-        )
-
-        question_users[info.message_id] = user.id
-
-        copied = await update.message.copy(chat_id=ADMIN_ID)
-        question_users[copied.message_id] = user.id
-
-        user_states.pop(user.id, None)
-
-        await update.message.reply_text(
-            "✅ Вопрос отправлен администратору.",
-            reply_markup=back_keyboard(),
-        )
-
-    except Exception as error:
-        logger.exception("QUESTION ERROR: %s", error)
-        await update.message.reply_text("❌ Ошибка отправки вопроса.")
-
-# ============================================================
-# TELEGRAM GIFTS
-# ============================================================
-
-async def get_gifts(context):
-    """
-    Берём настоящий актуальный каталог Telegram.
-    Поэтому цены и наличие не нужно вручную поддерживать.
-    """
-    result = await context.bot.get_available_gifts()
-    gifts = list(result.gifts)
-
-    # Сначала более дешёвые.
-    gifts.sort(key=lambda g: (g.star_count, str(g.id)))
-    return gifts
-
-
-def gift_by_id(gifts, gift_id):
-    for gift in gifts:
-        if str(gift.id) == str(gift_id):
-            return gift
-    return None
-
-
-def gift_button_title(gift):
-    # Bot API Gift не содержит человеческого имени.
-    # Показываем универсальное название + реальную цену.
-    return f"🎁 {gift.star_count} ⭐"
-
-
-async def gifts_menu(query, context):
-    user_states.pop(query.from_user.id, None)
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "Soon",
-            callback_data="GIFT_SOON",
-        )],
-        [InlineKeyboardButton(
-            "👥 Для друга",
-            callback_data="GIFT_FRIEND",
-        )],
-        [InlineKeyboardButton(
-            "◀️ Назад",
-            callback_data="BACK",
-        )],
-    ])
-
-    await safe_edit(
-        query,
-        "🎁 Выберите пункт",
-        keyboard,
-    )
-
-
-async def gift_friend_menu(query, context):
-    try:
-        gifts = await get_gifts(context)
-    except Exception as error:
-        logger.exception("GET GIFTS ERROR: %s", error)
-        await safe_edit(
-            query,
-            "❌ Не удалось загрузить подарки Telegram. Попробуйте ещё раз.",
-            back_keyboard("GIFTS"),
-        )
-        return
-
-    if not gifts:
-        await safe_edit(
-            query,
-            "❌ Сейчас нет доступных подарков.",
-            back_keyboard("GIFTS"),
-        )
-        return
-
-    # В inline keyboard нельзя показать картинки.
-    # Поэтому делаем компактную сетку из реальных gift_id.
-    rows = []
-    current = []
-
-    for gift in gifts[:30]:
-        current.append(
-            InlineKeyboardButton(
-                gift_button_title(gift),
-                callback_data=f"GIFT|{gift.id}",
-            )
-        )
-        if len(current) == 3:
-            rows.append(current)
-            current = []
-
-    if current:
-        rows.append(current)
-
-    rows.append([
-        InlineKeyboardButton("◀️ Назад", callback_data="GIFTS")
-    ])
-
-    await safe_edit(
-        query,
-        (
-            "🎁 Выберите подарок\n\n"
-            "Подарки и цены загружаются напрямую из актуального "
-            "каталога Telegram."
-        ),
-        InlineKeyboardMarkup(rows),
-    )
-
-
-async def selected_gift(query, context, gift_id):
-    try:
-        gifts = await get_gifts(context)
-    except Exception:
-        await safe_edit(
-            query,
-            "❌ Не удалось получить каталог подарков.",
-            back_keyboard("GIFT_FRIEND"),
-        )
-        return
-
-    gift = gift_by_id(gifts, gift_id)
-
-    if not gift:
-        await safe_edit(
-            query,
-            "❌ Этот подарок больше недоступен.",
-            back_keyboard("GIFT_FRIEND"),
-        )
-        return
-
-    user_data[query.from_user.id] = {
-        "gift_id": str(gift.id),
-        "gift_stars": int(gift.star_count),
-        "signature": "",
-    }
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "✏️ Добавить подпись подарку",
-            callback_data="GIFT_SIGNATURE",
-        )],
-        [InlineKeyboardButton(
-            "▶️ Начать",
-            callback_data="GIFT_START",
-        )],
-        [InlineKeyboardButton(
-            "◀️ Назад",
-            callback_data="GIFT_FRIEND",
-        )],
-    ])
-
-    # Показываем реальный sticker подарка.
-    try:
-        await query.message.reply_sticker(
-            sticker=gift.sticker.file_id,
-        )
-    except Exception:
-        pass
-
-    await safe_edit(
-        query,
-        (
-            f"👁️ Выбран подарок\n\n"
-            f"🎁 Подарок: {gift_button_title(gift)}\n\n"
-            f"Чтобы отправить другу Вам нужно оплатить "
-            f"{gift.star_count} ⭐\n\n"
-            "Важно! Друг должен запустить бота для того, "
-            "чтобы подарок пришел к нему."
-        ),
-        keyboard,
-    )
-
-
-async def gift_signature(query):
-    user_states[query.from_user.id] = "GIFT_SIGNATURE"
-
-    await safe_edit(
-        query,
-        (
-            "✏️ Добавить подпись подарку\n\n"
-            "Отправьте текст подписи одним сообщением.\n"
-            "Максимум 128 символов."
-        ),
-        back_keyboard("GIFT_SELECTED"),
-    )
-
-
-async def gift_start(query):
-    user = query.from_user
-    data = user_data.get(user.id)
-
-    if not data or not data.get("gift_id"):
-        await safe_edit(
-            query,
-            "❌ Сначала выберите подарок.",
-            back_keyboard("GIFT_FRIEND"),
-        )
-        return
-
-    user_states[user.id] = "GIFT_RECIPIENT"
-
-    await safe_edit(
-        query,
-        (
-            "👤 Отправьте @username получателя.\n\n"
-            "Получатель обязательно должен хотя бы один раз "
-            "запустить этого бота через /start."
-        ),
-        back_keyboard("GIFT_SELECTED"),
-    )
-
-
-async def gift_recipient(update, context):
-    user = update.effective_user
-    text = (update.message.text or "").strip()
-
-    if not re.fullmatch(r"@[A-Za-z0-9_]{5,32}", text):
-        await update.message.reply_text(
-            "❌ Отправьте корректный @username, например:\n@username"
-        )
-        return
-
-    row = find_user_by_username(text)
-
-    if not row:
-        await update.message.reply_text(
-            (
-                "❌ Этот пользователь ещё не запускал бота.\n\n"
-                "Попросите его открыть бота и нажать /start, "
-                "после чего повторите попытку."
-            )
-        )
-        return
-
-    if int(row["user_id"]) == user.id:
-        await update.message.reply_text(
-            "❌ Нельзя отправить подарок самому себе."
-        )
-        return
-
-    data = user_data.get(user.id)
-
-    if not data:
-        await update.message.reply_text(
-            "❌ Сессия подарка потеряна. Выберите подарок заново."
-        )
-        user_states.pop(user.id, None)
-        return
-
-    data["recipient_id"] = int(row["user_id"])
-    data["recipient_username"] = text
+    item = GIFTS[key]
 
     payload = (
-        "gift:"
-        f"{user.id}:"
-        f"{data['recipient_id']}:"
-        f"{data['gift_id']}:"
+        f"giftself:"
+        f"{key}:"
+        f"{q.from_user.id}:"
         f"{int(time.time())}"
     )
 
-    # Payload должен быть коротким.
-    payload = payload[:128]
-
-    data["payload"] = payload
-    user_states.pop(user.id, None)
-
-    await send_gift_invoice(
-        update,
-        context,
-        data,
-    )
-
-
-async def send_gift_invoice(update, context, data):
-    user = update.effective_user
-
-    stars = int(data["gift_stars"])
-    recipient = data["recipient_username"]
-
     await context.bot.send_invoice(
-        chat_id=user.id,
-        title="🎁 Подарок Telegram",
+        chat_id=q.from_user.id,
+        title=item["name"],
         description=(
-            f"Подарок для {recipient}\n"
-            f"Стоимость: {stars} Telegram Stars"
-        ),
-        payload=data["payload"],
-        currency="XTR",
-        prices=[
-            LabeledPrice(
-                "🎁 Подарок",
-                stars,
-            )
-        ],
-        # Для XTR provider_token НЕ нужен.
-    )
-
-    await update.message.reply_text(
-        (
-            "⭐ Счёт на оплату отправлен выше.\n\n"
-            "После успешной оплаты бот автоматически "
-            "отправит выбранный подарок получателю."
-        )
-    )
-
-# ============================================================
-# PRE-CHECKOUT
-# ============================================================
-
-async def pre_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.pre_checkout_query
-    payload = query.invoice_payload
-
-    # --------------------------------------------------------
-    # Обычный подарок другу
-    # --------------------------------------------------------
-    if payload.startswith("gift:"):
-        try:
-            parts = payload.split(":")
-            buyer_id = int(parts[1])
-            recipient_id = int(parts[2])
-            gift_id = parts[3]
-
-            if buyer_id != query.from_user.id:
-                raise ValueError
-
-            if recipient_id <= 0 or not gift_id:
-                raise ValueError
-
-        except Exception:
-            await query.answer(
-                ok=False,
-                error_message="Заказ повреждён. Создайте новый.",
-            )
-            return
-
-        try:
-            gifts = await get_gifts(context)
-            gift = gift_by_id(gifts, gift_id)
-
-            if not gift:
-                await query.answer(
-                    ok=False,
-                    error_message="Этот подарок больше недоступен.",
-                )
-                return
-
-            if int(gift.star_count) != int(query.total_amount):
-                await query.answer(
-                    ok=False,
-                    error_message="Цена подарка изменилась. Создайте заказ заново.",
-                )
-                return
-
-        except Exception:
-            await query.answer(
-                ok=False,
-                error_message="Не удалось проверить подарок.",
-            )
-            return
-
-        await query.answer(ok=True)
-        return
-
-    # --------------------------------------------------------
-    # Промокод на подарок, который создаёт администратор
-    # --------------------------------------------------------
-    if payload.startswith("giftpromo:"):
-        try:
-            parts = payload.split(":")
-            gift_id = parts[1]
-            uses = int(parts[2])
-
-            if query.from_user.id != ADMIN_ID:
-                raise ValueError
-
-            if uses <= 0 or not gift_id:
-                raise ValueError
-
-        except Exception:
-            await query.answer(
-                ok=False,
-                error_message="Некорректный заказ администратора.",
-            )
-            return
-
-        try:
-            gifts = await get_gifts(context)
-            gift = gift_by_id(gifts, gift_id)
-
-            if not gift:
-                await query.answer(
-                    ok=False,
-                    error_message="Этот подарок больше недоступен.",
-                )
-                return
-
-            expected = int(gift.star_count) * uses
-
-            if int(query.total_amount) != expected:
-                await query.answer(
-                    ok=False,
-                    error_message="Сумма заказа не совпадает.",
-                )
-                return
-
-        except Exception:
-            await query.answer(
-                ok=False,
-                error_message="Не удалось проверить подарок.",
-            )
-            return
-
-        await query.answer(ok=True)
-        return
-
-    await query.answer(
-        ok=False,
-        error_message="Неизвестный заказ.",
-    )
-
-# ============================================================
-# SUCCESSFUL PAYMENT -> SEND GIFT
-# ============================================================
-
-async def successful_payment(update, context):
-    message = update.message
-    payment = message.successful_payment
-    user = update.effective_user
-
-    payload = payment.invoice_payload
-
-    if not payload.startswith("gift:"):
-        return
-
-    try:
-        parts = payload.split(":")
-        buyer_id = int(parts[1])
-        recipient_id = int(parts[2])
-        gift_id = parts[3]
-
-        if buyer_id != user.id:
-            raise ValueError
-
-    except Exception:
-        await message.reply_text(
-            "❌ Не удалось разобрать заказ. Обратитесь к администратору."
-        )
-        return
-
-    data = user_data.get(user.id, {})
-
-    signature = data.get("signature", "")
-
-    # Если пользователь перезапустил бота между оплатой и
-    # successful_payment, подпись всё равно можно оставить пустой.
-    try:
-        # Сначала проверяем, что подарок всё ещё доступен.
-        gifts = await get_gifts(context)
-        gift = gift_by_id(gifts, gift_id)
-
-        if not gift:
-            raise RuntimeError("GIFT_UNAVAILABLE")
-
-        # Отправляем подарок уже ПОСЛЕ успешной оплаты.
-        await context.bot.send_gift(
-            user_id=recipient_id,
-            gift_id=str(gift.id),
-            text=signature[:128] if signature else None,
-        )
-
-        user_data.pop(user.id, None)
-
-        await message.reply_text(
-            (
-                "🎉 Оплата прошла успешно!\n\n"
-                f"🎁 Подарок отправлен {data.get('recipient_username', 'получателю')}.\n"
-                "Получатель должен получить подарок в Telegram."
-            )
-        )
-
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                "🎁 ПОДАРОК ОТПРАВЛЕН\n\n"
-                f"👤 Покупатель: {user_label(user)}\n"
-                f"🆔 Buyer ID: {user.id}\n"
-                f"🎯 Recipient ID: {recipient_id}\n"
-                f"🎁 Gift ID: {gift_id}\n"
-                f"⭐ Оплачено: {payment.total_amount} XTR"
-            ),
-        )
-
-    except Exception as error:
-        logger.exception("SEND GIFT ERROR: %s", error)
-
-        # Если доставка не удалась, возвращаем оплату.
-        try:
-            await context.bot.refund_star_payment(
-                user_id=user.id,
-                telegram_payment_charge_id=payment.telegram_payment_charge_id,
-            )
-
-            await message.reply_text(
-                (
-                    "❌ Не удалось отправить подарок.\n\n"
-                    "Оплата автоматически возвращена."
-                )
-            )
-        except Exception as refund_error:
-            logger.exception(
-                "REFUND ERROR: %s",
-                refund_error,
-            )
-
-            await message.reply_text(
-                (
-                    "❌ Оплата прошла, но подарок не удалось отправить.\n\n"
-                    "Обратитесь к администратору."
-                )
-            )
-
-# ============================================================
-# ADMIN PANEL
-# ============================================================
-
-def admin_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "➕ Создать промокод Деф",
-            callback_data="ADMIN_CREATE_DEF",
-        )],
-        [InlineKeyboardButton(
-            "🎁 Промокод подарок",
-            callback_data="ADMIN_GIFT_PROMO",
-        )],
-        [InlineKeyboardButton(
-            "📊 Статистика",
-            callback_data="ADMIN_STATS",
-        )],
-        [InlineKeyboardButton(
-            "⭐ Баланс Stars бота",
-            callback_data="ADMIN_STARS",
-        )],
-        [InlineKeyboardButton(
-            "◀️ Назад",
-            callback_data="BACK",
-        )],
-    ])
-
-
-async def admin(query):
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("⛔ Нет доступа.", show_alert=True)
-        return
-
-    await safe_edit(
-        query,
-        "🔐 Панель администратора\n\nВыберите действие:",
-        admin_keyboard(),
-    )
-
-# ============================================================
-# ADMIN DEF PROMO
-# ============================================================
-
-async def admin_create_def(query):
-    if query.from_user.id != ADMIN_ID:
-        return
-
-    admin_data.clear()
-    user_states[ADMIN_ID] = "PROMO_AMOUNT"
-
-    await safe_edit(
-        query,
-        "➕ Создание промокода Деф\n\nНапишите сколько Деф будет выдавать промокод.",
-        back_keyboard("ADMIN"),
-    )
-
-
-async def admin_amount(update):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    try:
-        amount = int(update.message.text.strip())
-        if amount <= 0:
-            raise ValueError
-    except Exception:
-        await update.message.reply_text("❌ Нужно положительное число.")
-        return
-
-    admin_data["amount"] = amount
-    user_states[ADMIN_ID] = "PROMO_USES"
-
-    await update.message.reply_text(
-        "Теперь напишите количество использований промокода."
-    )
-
-
-async def admin_uses(update):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    try:
-        uses = int(update.message.text.strip())
-        if uses <= 0:
-            raise ValueError
-    except Exception:
-        await update.message.reply_text("❌ Нужно положительное число.")
-        return
-
-    admin_data["uses"] = uses
-
-    await update.message.reply_text(
-        (
-            "📋 Проверьте:\n\n"
-            f"💰 Деф: {admin_data['amount']}\n"
-            f"👥 Использований: {uses}\n\n"
-            "Нажмите «Создать» в панели."
-        ),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                "✅ Создать",
-                callback_data="ADMIN_CONFIRM_DEF",
-            )],
-            [InlineKeyboardButton(
-                "❌ Отмена",
-                callback_data="ADMIN",
-            )],
-        ]),
-    )
-
-
-async def admin_confirm_def(query):
-    if query.from_user.id != ADMIN_ID:
-        return
-
-    if "amount" not in admin_data or "uses" not in admin_data:
-        await safe_edit(query, "❌ Данные создания промокода потеряны.", admin_keyboard())
-        return
-
-    code = generate_code()
-
-    db.execute(
-        """
-        INSERT INTO promos(code, amount, uses)
-        VALUES (?, ?, ?)
-        """,
-        (code, admin_data["amount"], admin_data["uses"]),
-    )
-    db.commit()
-
-    amount = admin_data["amount"]
-    uses = admin_data["uses"]
-
-    admin_data.clear()
-    user_states.pop(ADMIN_ID, None)
-
-    await safe_edit(
-        query,
-        (
-            "✅ ПРОМОКОД СОЗДАН\n\n"
-            f"🎟 {code}\n"
-            f"💰 {amount} Деф\n"
-            f"👥 Использований: {uses}"
-        ),
-        admin_keyboard(),
-    )
-
-# ============================================================
-# ADMIN GIFT PROMO
-# ============================================================
-
-async def admin_gift_promo(query, context):
-    if query.from_user.id != ADMIN_ID:
-        return
-
-    try:
-        gifts = await get_gifts(context)
-    except Exception:
-        await safe_edit(
-            query,
-            "❌ Не удалось загрузить подарки.",
-            admin_keyboard(),
-        )
-        return
-
-    rows = []
-    current = []
-
-    for gift in gifts[:30]:
-        current.append(
-            InlineKeyboardButton(
-                f"🎁 {gift.star_count} ⭐",
-                callback_data=f"ADMIN_GIFT|{gift.id}",
-            )
-        )
-
-        if len(current) == 3:
-            rows.append(current)
-            current = []
-
-    if current:
-        rows.append(current)
-
-    rows.append([
-        InlineKeyboardButton("◀️ Назад", callback_data="ADMIN")
-    ])
-
-    await safe_edit(
-        query,
-        (
-            "🎁 Промокод подарок\n\n"
-            "Выберите подарок.\n"
-            "Цены берутся из актуального каталога Telegram."
-        ),
-        InlineKeyboardMarkup(rows),
-    )
-
-
-async def admin_select_gift(query, context, gift_id):
-    if query.from_user.id != ADMIN_ID:
-        return
-
-    try:
-        gifts = await get_gifts(context)
-        gift = gift_by_id(gifts, gift_id)
-    except Exception:
-        gift = None
-
-    if not gift:
-        await safe_edit(
-            query,
-            "❌ Подарок больше недоступен.",
-            admin_keyboard(),
-        )
-        return
-
-    admin_data.clear()
-    admin_data["gift_id"] = str(gift.id)
-    admin_data["gift_stars"] = int(gift.star_count)
-
-    user_states[ADMIN_ID] = "GIFT_PROMO_USES"
-
-    await safe_edit(
-        query,
-        (
-            f"🎁 Выбран подарок: {gift.star_count} ⭐\n\n"
-            "Сколько активаций должно быть у промокода?"
-        ),
-        back_keyboard("ADMIN"),
-    )
-
-
-async def admin_gift_uses(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    try:
-        uses = int(update.message.text.strip())
-        if uses <= 0:
-            raise ValueError
-    except Exception:
-        await update.message.reply_text("❌ Нужно положительное число.")
-        return
-
-    if "gift_id" not in admin_data:
-        await update.message.reply_text("❌ Сессия потеряна.")
-        user_states.pop(ADMIN_ID, None)
-        return
-
-    admin_data["uses"] = uses
-
-    stars = admin_data["gift_stars"] * uses
-
-    await update.message.reply_text(
-        (
-            "🎁 ПРОМОКОД НА ПОДАРОК\n\n"
-            f"⭐ Цена одного подарка: {admin_data['gift_stars']} Stars\n"
-            f"👥 Активаций: {uses}\n"
-            f"💳 Всего к оплате: {stars} Stars\n\n"
-            "Оплатите счёт ниже. После успешной оплаты "
-            "бот создаст промокод."
-        )
-    )
-
-    payload = (
-        f"giftpromo:{admin_data['gift_id']}:"
-        f"{uses}:{int(time.time())}"
-    )[:128]
-
-    admin_data["payload"] = payload
-
-    await context.bot.send_invoice(
-        chat_id=ADMIN_ID,
-        title="🎁 Создание промокода подарка",
-        description=(
-            f"{uses} подарков по {admin_data['gift_stars']} Stars"
+            f"Подарок: {item['def']} Деф "
+            f"на собственный баланс"
         ),
         payload=payload,
+        provider_token="",
         currency="XTR",
         prices=[
             LabeledPrice(
-                "🎁 Подарки",
-                stars,
+                item["name"],
+                item["stars"]
             )
         ],
+        start_parameter="ceko-gift-self"
     )
 
+
 # ============================================================
-# ADMIN GIFT PROMO PAYMENT
+# ПОДАРОК ДРУГУ — ВВОД USERNAME
 # ============================================================
 
-async def successful_admin_gift_promo(update, context, payment):
-    if update.effective_user.id != ADMIN_ID:
+
+async def process_friend_username(update, context):
+
+    user = update.effective_user
+
+    if states.get(user.id) != "gift_friend_username":
         return False
 
-    payload = payment.invoice_payload
+    text = update.message.text.strip()
 
-    if not payload.startswith("giftpromo:"):
-        return False
-
-    try:
-        parts = payload.split(":")
-        gift_id = parts[1]
-        uses = int(parts[2])
-    except Exception:
-        return False
-
-    # Проверяем, что это именно текущая админская сессия.
-    if admin_data.get("payload") != payload:
+    if not re.fullmatch(
+        r"@?[A-Za-z0-9_]{5,32}",
+        text
+    ):
         await update.message.reply_text(
-            "❌ Сессия создания промокода потеряна. Обратитесь к администратору."
+            "❌ Неверный username.\n\n"
+            "Пример: @username"
         )
         return True
 
-    gift_stars = int(admin_data["gift_stars"])
+    username = text.replace("@", "").lower()
 
-    code = generate_code()
+    receiver = find_user_by_username(username)
 
-    db.execute(
-        """
-        INSERT INTO gift_promos(code, gift_id, gift_stars, uses)
-        VALUES (?, ?, ?, ?)
-        """,
-        (code, gift_id, gift_stars, uses),
-    )
-    db.commit()
+    if not receiver:
 
-    admin_data.clear()
-    user_states.pop(ADMIN_ID, None)
+        await update.message.reply_text(
+            "❌ Этот пользователь ещё не запускал бота.\n\n"
+            "Попросите его открыть бота и нажать /start."
+        )
+
+        return True
+
+    states.pop(user.id, None)
+
+    context.user_data["gift_receiver_id"] = receiver["user_id"]
+    context.user_data["gift_receiver_username"] = username
+
+    keyboard = []
+
+    for key, item in GIFTS.items():
+
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{item['name']} — {item['stars']} ⭐",
+                callback_data=f"giftfriend:{key}"
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            "↩️ Назад",
+            callback_data="gift"
+        )
+    ])
 
     await update.message.reply_text(
-        (
-            "🎉 ПРОМОКОД НА ПОДАРОК СОЗДАН!\n\n"
-            f"🎟 {code}\n"
-            f"🎁 Подарок: {gift_stars} ⭐\n"
-            f"👥 Активаций: {uses}\n\n"
-            "Каждая активация отправит настоящий подарок "
-            "активировавшему пользователю."
-        )
+        f"👤 Получатель: @{username}\n\n"
+        "🎁 Выберите подарок:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
     return True
 
+
+async def gift_friend_selected(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    key = q.data.split(":", 1)[1]
+
+    receiver_id = context.user_data.get(
+        "gift_receiver_id"
+    )
+
+    receiver_username = context.user_data.get(
+        "gift_receiver_username"
+    )
+
+    if not receiver_id:
+
+        await q.edit_message_text(
+            "❌ Получатель не выбран."
+        )
+
+        return
+
+    item = GIFTS[key]
+
+    payload = (
+        f"giftfriend:"
+        f"{key}:"
+        f"{q.from_user.id}:"
+        f"{receiver_id}:"
+        f"{int(time.time())}"
+    )
+
+    await context.bot.send_invoice(
+        chat_id=q.from_user.id,
+        title=item["name"],
+        description=(
+            f"Подарок @{receiver_username}: "
+            f"{item['def']} Деф"
+        ),
+        payload=payload,
+        provider_token="",
+        currency="XTR",
+        prices=[
+            LabeledPrice(
+                item["name"],
+                item["stars"]
+            )
+        ],
+        start_parameter="ceko-gift-friend"
+    )
+
+
 # ============================================================
-# GIFT PROMO USE
+# ПЛАТЕЖИ
 # ============================================================
 
-async def check_gift_promo(update, context):
+
+async def pre_checkout(update, context):
+
+    query = update.pre_checkout_query
+
+    payload = query.invoice_payload
+
+    if not payload:
+        await query.answer(
+            ok=False,
+            error_message="Ошибка заказа."
+        )
+        return
+
+    await query.answer(ok=True)
+
+
+async def successful_payment(update, context):
+
+    payment = update.message.successful_payment
+
+    payload = payment.invoice_payload
+
+    parts = payload.split(":")
+
+    # --------------------------------------------------------
+    # ПОКУПКА СЕБЕ
+    # --------------------------------------------------------
+
+    if parts[0] == "self":
+
+        amount = int(parts[1])
+        buyer_id = int(parts[2])
+
+        if buyer_id != update.effective_user.id:
+            return
+
+        add_def(
+            buyer_id,
+            amount
+        )
+
+        await update.message.reply_text(
+            "✅ Оплата успешно получена!\n\n"
+            f"🎁 Вам начислено {amount} Деф\n"
+            f"💰 Баланс: {get_balance(buyer_id)} Деф",
+            reply_markup=main_menu()
+        )
+
+        save_order(
+            buyer_id=buyer_id,
+            receiver_id=buyer_id,
+            receiver_username=(
+                update.effective_user.username or ""
+            ),
+            item=f"{amount} Деф",
+            def_amount=amount,
+            stars=payment.total_amount,
+            status="paid",
+            payload=payload,
+            charge_id=(
+                payment.telegram_payment_charge_id
+            )
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # ПОДАРОК СЕБЕ
+    # --------------------------------------------------------
+
+    if parts[0] == "giftself":
+
+        key = parts[1]
+        buyer_id = int(parts[2])
+
+        if buyer_id != update.effective_user.id:
+            return
+
+        item = GIFTS[key]
+
+        add_def(
+            buyer_id,
+            item["def"]
+        )
+
+        save_order(
+            buyer_id=buyer_id,
+            receiver_id=buyer_id,
+            receiver_username=(
+                update.effective_user.username or ""
+            ),
+            item=item["name"],
+            def_amount=item["def"],
+            stars=payment.total_amount,
+            status="paid",
+            payload=payload,
+            charge_id=(
+                payment.telegram_payment_charge_id
+            )
+        )
+
+        await update.message.reply_text(
+            "🎁 Подарок получен!\n\n"
+            f"{item['name']}\n"
+            f"+{item['def']} Деф\n\n"
+            f"💰 Баланс: {get_balance(buyer_id)} Деф",
+            reply_markup=main_menu()
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # ПОДАРОК ДРУГУ
+    # --------------------------------------------------------
+
+    if parts[0] == "giftfriend":
+
+        key = parts[1]
+        buyer_id = int(parts[2])
+        receiver_id = int(parts[3])
+
+        if buyer_id != update.effective_user.id:
+            return
+
+        item = GIFTS[key]
+
+        # Начисляем Деф получателю
+        add_def(
+            receiver_id,
+            item["def"]
+        )
+
+        receiver = db().execute(
+            "SELECT username FROM users WHERE user_id=?",
+            (receiver_id,)
+        ).fetchone()
+
+        receiver_username = (
+            receiver["username"]
+            if receiver else ""
+        )
+
+        save_order(
+            buyer_id=buyer_id,
+            receiver_id=receiver_id,
+            receiver_username=receiver_username,
+            item=item["name"],
+            def_amount=item["def"],
+            stars=payment.total_amount,
+            status="paid",
+            payload=payload,
+            charge_id=(
+                payment.telegram_payment_charge_id
+            )
+        )
+
+        await update.message.reply_text(
+            "✅ Подарок успешно отправлен!\n\n"
+            f"🎁 {item['name']}\n"
+            f"👤 Получатель: "
+            f"@{receiver_username or receiver_id}\n"
+            f"💎 {item['def']} Деф",
+            reply_markup=main_menu()
+        )
+
+        try:
+
+            await context.bot.send_message(
+                receiver_id,
+                "🎁 Вам пришёл подарок!\n\n"
+                f"{item['name']}\n"
+                f"+{item['def']} Деф\n\n"
+                f"💰 Ваш баланс: "
+                f"{get_balance(receiver_id)} Деф"
+            )
+
+        except Exception as e:
+
+            print(
+                "Не удалось отправить уведомление:",
+                e
+            )
+
+        return
+
+
+def save_order(
+    buyer_id,
+    receiver_id,
+    receiver_username,
+    item,
+    def_amount,
+    stars,
+    status,
+    payload,
+    charge_id
+):
+
+    con = db()
+
+    con.execute(
+        """
+        INSERT INTO orders(
+            buyer_id,
+            receiver_id,
+            receiver_username,
+            item,
+            def_amount,
+            stars,
+            status,
+            payload,
+            charge_id,
+            created
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            buyer_id,
+            receiver_id,
+            receiver_username,
+            item,
+            def_amount,
+            stars,
+            status,
+            payload,
+            charge_id,
+            int(time.time())
+        )
+    )
+
+    con.commit()
+    con.close()
+
+
+# ============================================================
+# ПРОМОКОД
+# ============================================================
+
+
+async def promo(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    states[q.from_user.id] = "promo"
+
+    await q.edit_message_text(
+        "🫆 Введите промокод:",
+        reply_markup=back()
+    )
+
+
+async def process_promo(update, context):
+
     user = update.effective_user
+
     code = update.message.text.strip().upper()
 
-    row = db.execute(
+    con = db()
+
+    row = con.execute(
         """
-        SELECT gift_id, gift_stars, uses
-        FROM gift_promos
+        SELECT *
+        FROM promos
         WHERE code=?
+        AND active=1
+        AND uses_left>0
         """,
-        (code,),
+        (code,)
     ).fetchone()
 
     if not row:
-        return False
 
-    if row["uses"] <= 0:
+        con.close()
+
         await update.message.reply_text(
-            "❌ Этот промокод на подарок больше недоступен."
+            "❌ Промокод недоступен."
         )
+
         return True
 
-    # Сначала проверяем, что подарок ещё можно отправить.
-    try:
-        gifts = await get_gifts(context)
-        gift = gift_by_id(gifts, row["gift_id"])
-        if not gift:
-            await update.message.reply_text(
-                "❌ Этот подарок сейчас недоступен. Попробуйте позже."
-            )
-            return True
-    except Exception:
-        await update.message.reply_text(
-            "❌ Не удалось проверить подарок."
-        )
-        return True
+    add_def(
+        user.id,
+        row["reward"]
+    )
 
-    # Уменьшаем активации только после успешной отправки.
-    try:
-        await context.bot.send_gift(
-            user_id=user.id,
-            gift_id=str(gift.id),
-        )
+    con.execute(
+        """
+        UPDATE promos
+        SET uses_left=uses_left-1
+        WHERE code=?
+        """,
+        (code,)
+    )
 
-        db.execute(
-            """
-            UPDATE gift_promos
-            SET uses=uses-1
-            WHERE code=? AND uses>0
-            """,
-            (code,),
-        )
-        db.commit()
+    con.execute(
+        """
+        UPDATE promos
+        SET active=0
+        WHERE code=?
+        AND uses_left<=0
+        """,
+        (code,)
+    )
 
-        await update.message.reply_text(
-            (
-                "🎉 Промокод активирован!\n\n"
-                f"🎁 Вам отправлен подарок стоимостью "
-                f"{gift.star_count} ⭐"
-            )
-        )
+    con.commit()
+    con.close()
 
-    except Exception as error:
-        logger.exception("GIFT PROMO SEND ERROR: %s", error)
-        await update.message.reply_text(
-            "❌ Не удалось отправить подарок. Активация не списана."
-        )
+    states.pop(user.id, None)
+
+    await update.message.reply_text(
+        "✅ Промокод активирован!\n\n"
+        f"🎁 +{row['reward']} Деф\n"
+        f"💰 Баланс: {get_balance(user.id)} Деф",
+        reply_markup=main_menu()
+    )
 
     return True
 
+
 # ============================================================
-# ADMIN STATS / STARS
+# ВОПРОС
 # ============================================================
 
-async def admin_stats(query):
-    if query.from_user.id != ADMIN_ID:
-        return
 
-    users = db.execute(
-        "SELECT COUNT(*) AS c FROM users"
-    ).fetchone()["c"]
+async def question(update, context):
 
-    total = db.execute(
-        "SELECT COALESCE(SUM(balance),0) AS s FROM users"
-    ).fetchone()["s"]
+    q = update.callback_query
+    await q.answer()
 
-    promos = db.execute(
-        "SELECT COUNT(*) AS c FROM promos"
-    ).fetchone()["c"]
+    states[q.from_user.id] = "question"
 
-    gift_promos = db.execute(
-        "SELECT COUNT(*) AS c FROM gift_promos"
-    ).fetchone()["c"]
-
-    await safe_edit(
-        query,
-        (
-            "📊 СТАТИСТИКА\n\n"
-            f"👥 Пользователей: {users}\n"
-            f"💰 Деф на балансах: {total}\n"
-            f"🎟 Промокодов Деф: {promos}\n"
-            f"🎁 Промокодов подарков: {gift_promos}"
-        ),
-        admin_keyboard(),
+    await q.edit_message_text(
+        "🔰 Напишите свой вопрос Ceko.\n\n"
+        "Можно отправить текст."
     )
 
 
-async def admin_stars(query, context):
-    if query.from_user.id != ADMIN_ID:
-        return
+async def process_question(update, context):
 
-    try:
-        balance = await context.bot.get_my_star_balance()
-        amount = getattr(balance, "amount", None)
-
-        if amount is None:
-            text = f"⭐ Баланс Stars бота:\n{balance}"
-        else:
-            text = f"⭐ Баланс Stars бота: {amount}"
-
-    except Exception as error:
-        logger.exception("STAR BALANCE ERROR: %s", error)
-        text = "❌ Не удалось получить баланс Stars."
-
-    await safe_edit(
-        query,
-        text,
-        admin_keyboard(),
-    )
-
-# ============================================================
-# PENSION GAME
-# ============================================================
-
-async def pension(update, context):
     user = update.effective_user
-    if not user:
+
+    await context.bot.send_message(
+        ADMIN_ID,
+        "🔰 Новый вопрос\n\n"
+        f"👤 {display_name(user)}\n"
+        f"🆔 {user.id}\n\n"
+        f"{update.message.text}"
+    )
+
+    states.pop(user.id, None)
+
+    await update.message.reply_text(
+        "✅ Вопрос отправлен администратору.",
+        reply_markup=main_menu()
+    )
+
+    return True
+
+
+# ============================================================
+# ЗАКАЗ ДЕФ
+# ============================================================
+
+
+async def def_order(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    await q.edit_message_text(
+        "👾 Выбирай пункт:",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "1 Деф — 1 Деф очка",
+                    callback_data="def_confirm"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "↩️ Назад",
+                    callback_data="main"
+                )
+            ]
+        ])
+    )
+
+
+async def def_confirm(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    if get_balance(q.from_user.id) < 1:
+
+        await q.edit_message_text(
+            "❌ Недостаточно Деф.",
+            reply_markup=back()
+        )
+
         return
 
-    ensure_user(user)
+    await q.edit_message_text(
+        "Подтвердить заказ?\n\n"
+        "Стоимость: 1 Деф",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "✅ Подтвердить",
+                    callback_data="def_yes"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "❌ Отмена",
+                    callback_data="main"
+                )
+            ]
+        ])
+    )
 
-    row = db.execute(
-        """
-        SELECT pension, pension_until, broken
-        FROM users
-        WHERE user_id=?
-        """,
-        (user.id,),
+
+async def def_yes(update, context):
+
+    q = update.callback_query
+    await q.answer()
+
+    if not remove_def(q.from_user.id, 1):
+
+        await q.edit_message_text(
+            "❌ Недостаточно Деф."
+        )
+
+        return
+
+    await q.edit_message_text(
+        "✅ Ваш запрос принят и обрабатывается.\n\n"
+        "Подождите несколько минут."
+    )
+
+    await context.bot.send_message(
+        ADMIN_ID,
+        "👾 Новая заявка\n\n"
+        f"👤 {display_name(q.from_user)}\n"
+        f"🆔 {q.from_user.id}\n"
+        "📦 Заказ: 1 Деф\n"
+        "💸 Списано: 1 Деф"
+    )
+
+
+# ============================================================
+# ПРАВИЛА
+# ============================================================
+
+
+async def rules(update, context):
+
+    con = db()
+
+    row = con.execute(
+        "SELECT value FROM settings WHERE key='rules'"
     ).fetchone()
 
-    now = int(time.time())
+    con.close()
 
-    if row["broken"]:
-        await update.message.reply_text(
-            f"{mention(user)} бабки сломали вашу базу понижения пенсии",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(
-                    "🔨 Восстановить",
-                    callback_data=f"RESTORE|{user.id}",
-                )]
-            ]),
+    await update.message.reply_text(
+        row["value"]
+        if row
+        else "Правила не установлены."
+    )
+
+
+# ============================================================
+# ИГРОВАЯ КОМАНДА
+# ============================================================
+
+
+async def pension(update, context):
+
+    user = update.effective_user
+
+    now = time.time()
+
+    last = cooldowns.get(user.id, 0)
+
+    if now - last < 120:
+
+        remaining = int(
+            120 - (now - last)
         )
+
+        await update.message.reply_text(
+            f"⏳ Подожди {remaining} сек."
+        )
+
         return
 
-    if row["pension_until"] > now:
-        await update.message.reply_text(
-            f"⏳ Подожди ещё {row['pension_until'] - now} секунд."
-        )
-        return
+    cooldowns[user.id] = now
 
-    value = round(float(row["pension"]) + 0.1, 1)
+    con = db()
 
-    db.execute(
+    row = con.execute(
+        "SELECT pension FROM users WHERE user_id=?",
+        (user.id,)
+    ).fetchone()
+
+    value = float(
+        row["pension"]
+        if row
+        else 0.1
+    )
+
+    value = round(
+        value + 0.1,
+        1
+    )
+
+    con.execute(
         """
         UPDATE users
-        SET pension=?, pension_until=?
+        SET pension=?
         WHERE user_id=?
         """,
-        (value, now + PENSION_COOLDOWN, user.id),
+        (value, user.id)
     )
-    db.commit()
 
-    if random.random() < 0.03:
-        db.execute(
-            "UPDATE users SET broken=1 WHERE user_id=?",
-            (user.id,),
-        )
-        db.commit()
+    con.commit()
+    con.close()
+
+    await update.message.reply_text(
+        f"{display_name(user)} "
+        "понизил пенсию бабушкам\n\n"
+        f"Понижено {value}%"
+    )
+
+    if random.random() < 0.15:
+
+        broken_bases.add(user.id)
 
         await update.message.reply_text(
-            f"{mention(user)} бабки сломали вашу базу понижения пенсии",
-            parse_mode="HTML",
+            "💥 Бабки сломали вашу базу "
+            "понижения пенсии!",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(
-                    "🔨 Восстановить",
-                    callback_data=f"RESTORE|{user.id}",
-                )]
-            ]),
-        )
-    else:
-        await update.message.reply_text(
-            (
-                f"{mention(user)} понизил пенсию бабушкам\n\n"
-                f"Понижено {value:.1f}%"
-            ),
-            parse_mode="HTML",
+                [
+                    InlineKeyboardButton(
+                        "🔨 Восстановить",
+                        callback_data=f"restore:{user.id}"
+                    )
+                ]
+            ])
         )
 
 
-async def restore(query, user_id):
-    if query.from_user.id != user_id:
-        await query.answer("❌ Это не ваша база.", show_alert=True)
+async def restore(update, context):
+
+    q = update.callback_query
+
+    await q.answer()
+
+    user_id = int(
+        q.data.split(":")[1]
+    )
+
+    if q.from_user.id != user_id:
+
+        await q.answer(
+            "Это не ваша база.",
+            show_alert=True
+        )
+
         return
 
-    db.execute(
-        "UPDATE users SET broken=0 WHERE user_id=?",
-        (user_id,),
-    )
-    db.commit()
+    broken_bases.discard(user_id)
 
-    await query.edit_message_text(
+    await q.edit_message_text(
         "✅ Вы восстановили свою базу!"
     )
 
 
 async def top(update, context):
-    rows = db.execute(
+
+    con = db()
+
+    rows = con.execute(
         """
-        SELECT username, user_id, pension
+        SELECT username,pension
         FROM users
-        WHERE pension>0
         ORDER BY pension DESC
         LIMIT 10
         """
     ).fetchall()
 
-    text = "🏆 ТОП ПОНИЖЕНИЯ ПЕНСИИ\n\n"
+    con.close()
 
-    if not rows:
-        text += "Пока никто не играл."
-    else:
-        for i, row in enumerate(rows, 1):
-            name = (
-                "@" + row["username"]
-                if row["username"]
-                else f"ID {row['user_id']}"
+    text = "🏆 ТОП\n\n"
+
+    for i, row in enumerate(rows, 1):
+
+        name = row["username"] or "unknown"
+
+        text += (
+            f"{i}. @{name} — "
+            f"{row['pension']}%\n"
+        )
+
+    await update.message.reply_text(
+        text
+    )
+
+
+# ============================================================
+# АДМИН
+# ============================================================
+
+
+def admin_keyboard():
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "➕ Создать промо Деф",
+                callback_data="admin_promo"
             )
-            text += f"{i}. {name} — {float(row['pension']):.1f}%\n"
+        ],
+        [
+            InlineKeyboardButton(
+                "📊 Статистика",
+                callback_data="admin_stats"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↩️ Главное меню",
+                callback_data="main"
+            )
+        ]
+    ])
 
-    await update.message.reply_text(text)
 
-# ============================================================
-# RULES / NEW MEMBERS
-# ============================================================
+async def admin(update, context):
 
-async def rules_command(update, context):
-    await update.message.reply_text(get_rules())
-
-
-async def update_rules_command(update, context):
     if update.effective_user.id != ADMIN_ID:
+
+        await update.message.reply_text(
+            "❌ Нет доступа."
+        )
+
         return
 
-    text = update.message.text or ""
+    await update.message.reply_text(
+        "🔐 Панель администратора",
+        reply_markup=admin_keyboard()
+    )
 
-    new_rules = re.sub(
-        r"(?is)^\s*обн\s+правила\s*",
-        "",
-        text,
+
+async def admin_promo(update, context):
+
+    q = update.callback_query
+
+    await q.answer()
+
+    if q.from_user.id != ADMIN_ID:
+        return
+
+    states[q.from_user.id] = "admin_reward"
+
+    await q.edit_message_text(
+        "Введите сколько Деф будет давать промокод:"
+    )
+
+
+async def admin_text(update, context):
+
+    user = update.effective_user
+
+    if user.id != ADMIN_ID:
+        return False
+
+    state = states.get(user.id)
+
+    if state == "admin_reward":
+
+        try:
+            reward = int(
+                update.message.text
+            )
+        except:
+            await update.message.reply_text(
+                "Введите число."
+            )
+            return True
+
+        context.user_data["promo_reward"] = reward
+
+        states[user.id] = "admin_uses"
+
+        await update.message.reply_text(
+            "Теперь введите количество активаций:"
+        )
+
+        return True
+
+    if state == "admin_uses":
+
+        try:
+            uses = int(
+                update.message.text
+            )
+        except:
+            await update.message.reply_text(
+                "Введите число."
+            )
+            return True
+
+        reward = context.user_data.pop(
+            "promo_reward"
+        )
+
+        code = "".join(
+            random.choice(
+                string.ascii_uppercase
+                + string.digits
+            )
+            for _ in range(10)
+        )
+
+        con = db()
+
+        con.execute(
+            """
+            INSERT INTO promos
+            (code,reward,uses_left,active)
+            VALUES(?,?,?,1)
+            """,
+            (
+                code,
+                reward,
+                uses
+            )
+        )
+
+        con.commit()
+        con.close()
+
+        states.pop(user.id, None)
+
+        await update.message.reply_text(
+            "✅ Промокод создан!\n\n"
+            f"🎟 {code}\n"
+            f"🎁 {reward} Деф\n"
+            f"🔢 Активаций: {uses}"
+        )
+
+        return True
+
+    return False
+
+
+# ============================================================
+# КНОПКА НАЗАД
+# ============================================================
+
+
+async def main_callback(update, context):
+
+    q = update.callback_query
+
+    await q.answer()
+
+    states.pop(
+        q.from_user.id,
+        None
+    )
+
+    await q.edit_message_text(
+        "🔰 Ceko Hub\n\n"
+        f"Баланс: {get_balance(q.from_user.id)} Деф",
+        reply_markup=main_menu()
+    )
+
+
+# ============================================================
+# ТЕКСТ
+# ============================================================
+
+
+async def text_handler(update, context):
+
+    user = update.effective_user
+
+    register(user)
+
+    # Админские состояния
+    if user.id == ADMIN_ID:
+
+        if await admin_text(
+            update,
+            context
+        ):
+            return
+
+    # Подарок другу
+    if states.get(user.id) == "gift_friend_username":
+
+        if await process_friend_username(
+            update,
+            context
+        ):
+            return
+
+    # Промокод
+    if states.get(user.id) == "promo":
+
+        if await process_promo(
+            update,
+            context
+        ):
+            return
+
+    # Вопрос
+    if states.get(user.id) == "question":
+
+        if await process_question(
+            update,
+            context
+        ):
+            return
+
+    text = (
+        update.message.text
+        or ""
     ).strip()
 
-    if not new_rules:
+    low = text.lower()
+
+    # Только точное слово "бот"
+    if low == "бот":
+
         await update.message.reply_text(
-            "❌ Напишите новый текст после «Обн правила»."
-        )
-        return
-
-    set_rules(new_rules)
-    await update.message.reply_text("✅ Правила успешно обновлены!")
-
-
-async def new_member(update, context):
-    message = update.message
-    if not message or not message.new_chat_members:
-        return
-
-    for user in message.new_chat_members:
-        if user.is_bot:
-            continue
-
-        await message.reply_text(
-            (
-                f"{mention(user)} приветствую тебя в наш чат Ceko 👋\n\n"
-                "Чтобы посмотреть правила напиши:\n"
-                "правила"
-            ),
-            parse_mode="HTML",
+            "Ceko на месте✅"
         )
 
-# ============================================================
-# GROUP MODERATION / BOT WORD
-# ============================================================
-
-LINK_PATTERN = (
-    r"(https?://\S+)"
-    r"|"
-    r"(www\.\S+)"
-    r"|"
-    r"(t\.me/\S+)"
-    r"|"
-    r"(telegram\.me/\S+)"
-    r"|"
-    r"(discord\.gg/\S+)"
-)
-
-
-async def group_chat(update, context):
-    message = update.message
-    if not message:
         return
 
-    user = update.effective_user
-    if not user or user.is_bot:
-        return
+    if low == "правила":
 
-    text = message.text or ""
+        con = db()
 
-    if re.fullmatch(r"\s*правила\s*", text, flags=re.IGNORECASE):
-        await rules_command(update, context)
-        return
+        row = con.execute(
+            "SELECT value FROM settings WHERE key='rules'"
+        ).fetchone()
 
-    if re.search(LINK_PATTERN, text, flags=re.IGNORECASE):
-        if user.id == ADMIN_ID:
-            return
+        con.close()
 
-        try:
-            await message.delete()
-        except Exception:
-            pass
-
-        try:
-            await context.bot.restrict_chat_member(
-                chat_id=update.effective_chat.id,
-                user_id=user.id,
-                permissions=ChatPermissions(
-                    can_send_messages=False
-                ),
-                until_date=int(time.time()) + 3600,
-            )
-
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=(
-                    f"{mention(user)} был замучен на 1 час\n"
-                    "Причина: реклама"
-                ),
-                parse_mode="HTML",
-            )
-        except Exception as error:
-            logger.exception("MUTE ERROR: %s", error)
+        await update.message.reply_text(
+            row["value"]
+            if row
+            else "Правила не установлены."
+        )
 
         return
 
-    # Только отдельное слово "бот".
-    if re.search(
-        r"(?<![а-яёa-z0-9])бот(?![а-яёa-z0-9])",
-        text,
-        flags=re.IGNORECASE,
+    if low in (
+        "понизить пенсию бабушкам",
+        "ппб"
     ):
-        await message.reply_text("Ceko на месте✅")
 
-# ============================================================
-# JERRY
-# ============================================================
+        await pension(
+            update,
+            context
+        )
 
-async def random_jerry(update, context):
-    if not update.message:
         return
 
-    user = update.effective_user
-    if not user or user.is_bot:
+    if low == "топ":
+
+        await top(
+            update,
+            context
+        )
+
         return
 
-    if random.random() > 0.01:
-        return
-
-    if not os.path.isfile(JERRY_VIDEO):
-        return
-
-    try:
-        with open(JERRY_VIDEO, "rb") as video:
-            await update.message.reply_video(video=video)
-    except Exception:
-        pass
 
 # ============================================================
-# CHANNEL AUTO REPLY
+# НОВЫЙ УЧАСТНИК
 # ============================================================
 
-CHANNEL_RULES_TEXT = (
-    "💬Здраствуйте Посетители этого чата\n"
-    "Прошу вас не нарушать правила а именно\n"
-    "Оск родни -\n"
-    "Пиар чатов или тгк -\n"
-    "Писать типо я тебя сватну или доксну -\n"
-    "Общайтесь с матами приколами или чем то Ешё "
-    "ну без всего этого что я перечислил 👆"
-)
+
+async def welcome(update, context):
+
+    for member in update.message.new_chat_members:
+
+        name = (
+            f"@{member.username}"
+            if member.username
+            else member.first_name
+        )
+
+        await update.message.reply_text(
+            f"{name} приветствую тебя "
+            "в наш чат Ceko\n\n"
+            "Чтобы посмотреть правила "
+            "напиши правила"
+        )
 
 
-async def channel_auto_reply(update, context):
+# ============================================================
+# ССЫЛКИ В ЧАТЕ
+# ============================================================
+
+
+async def link_moderation(update, context):
+
     message = update.message
 
     if not message:
         return
 
-    if not message.is_automatic_forward:
+    if message.chat.type not in (
+        "group",
+        "supergroup"
+    ):
         return
 
-    if message.date:
-        age = time.time() - message.date.timestamp()
-        if age > 10:
-            return
-
-    try:
-        await message.reply_text(CHANNEL_RULES_TEXT)
-    except Exception:
-        pass
-
-# ============================================================
-# PRIVATE MESSAGE ROUTER
-# ============================================================
-
-async def private_message_router(update, context):
-    user = update.effective_user
-    if not user:
-        return
-
-    ensure_user(user)
-
-    state = user_states.get(user.id)
-
-    # Gift recipient has priority.
-    if state == "GIFT_RECIPIENT":
-        await gift_recipient(update, context)
-        return
-
-    if state == "GIFT_SIGNATURE":
-        text = update.message.text or ""
-
-        if len(text) > 128:
-            await update.message.reply_text(
-                "❌ Подпись максимум 128 символов."
-            )
-            return
-
-        data = user_data.get(user.id)
-        if not data:
-            await update.message.reply_text(
-                "❌ Сессия подарка потеряна."
-            )
-            user_states.pop(user.id, None)
-            return
-
-        data["signature"] = text
-        user_states.pop(user.id, None)
-
-        await update.message.reply_text(
-            "✅ Подпись сохранена.\n\nТеперь нажмите «Начать» в меню подарка.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(
-                    "▶️ Начать",
-                    callback_data="GIFT_START",
-                )],
-                [InlineKeyboardButton(
-                    "◀️ Назад",
-                    callback_data="GIFT_FRIEND",
-                )],
-            ]),
-        )
-        return
-
-    if state == "PROMO":
-        if update.message.text:
-            # Сначала подарок-промокод, затем Деф.
-            if await check_gift_promo(update, context):
-                user_states.pop(user.id, None)
-                return
-
-            await check_def_promo(update)
-        return
-
-    if state == "QUESTION":
-        await receive_question(update, context)
-        return
-
-    if user.id == ADMIN_ID:
-        if state == "PROMO_AMOUNT":
-            await admin_amount(update)
-            return
-
-        if state == "PROMO_USES":
-            await admin_uses(update)
-            return
-
-        if state == "GIFT_PROMO_USES":
-            await admin_gift_uses(update, context)
-            return
-
-# ============================================================
-# ADMIN REPLY
-# ============================================================
-
-async def admin_reply(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    message = update.message
-
-    if not message or not message.reply_to_message:
-        return
-
-    target_user = question_users.get(
-        message.reply_to_message.message_id
+    text = (
+        message.text
+        or message.caption
+        or ""
     )
 
-    if not target_user:
+    if not re.search(
+        r"(https?://|t\.me/|www\.)",
+        text,
+        re.I
+    ):
         return
 
     try:
-        await message.copy(chat_id=target_user)
-        await message.reply_text("✅ Ответ отправлен.")
-    except Exception:
-        await message.reply_text("❌ Не удалось отправить ответ.")
 
-# ============================================================
-# CALLBACK HANDLER
-# ============================================================
+        await message.delete()
 
-async def callback_handler(update, context):
-    query = update.callback_query
-    if not query:
-        return
-
-    data = query.data or ""
-
-    try:
-        await query.answer()
-    except Exception:
-        pass
-
-    try:
-        # Main
-        if data == "BACK":
-            await main_menu(query)
-            return
-
-        # Catalog
-        if data == "CATALOG":
-            await catalog(query)
-            return
-
-        if data.startswith("PRODUCT|"):
-            parts = data.split("|")
-            await product(
-                query,
-                int(parts[1]),
-                int(parts[2]),
-            )
-            return
-
-        if data.startswith("PAY|"):
-            parts = data.split("|")
-            await payment(
-                query,
-                context,
-                int(parts[1]),
-                int(parts[2]),
-            )
-            return
-
-        if data.startswith("CONFIRM|"):
-            parts = data.split("|")
-            await confirm_payment(
-                query,
-                context,
-                int(parts[1]),
-                int(parts[2]),
-            )
-            return
-
-        # Def promo
-        if data == "PROMO":
-            await promo(query)
-            return
-
-        # Order
-        if data == "ORDER":
-            await order(query)
-            return
-
-        if data == "ORDER_ONE":
-            await order_one(query)
-            return
-
-        if data == "ORDER_CONFIRM":
-            await order_confirm(query, context)
-            return
-
-        # Channel
-        if data == "CHANNEL":
-            await channel(query)
-            return
-
-        # Question
-        if data == "QUESTION":
-            await question(query)
-            return
-
-        # Balance
-        if data == "BALANCE":
-            await query.answer(
-                f"💰 Баланс: {get_balance(query.from_user.id)} Деф",
-                show_alert=True,
-            )
-            return
-
-        # Gifts
-        if data == "GIFTS":
-            await gifts_menu(query, context)
-            return
-
-        if data == "GIFT_SOON":
-            # намеренно ничего не делает
-            await query.answer("Soon 🔜", show_alert=True)
-            return
-
-        if data == "GIFT_FRIEND":
-            await gift_friend_menu(query, context)
-            return
-
-        if data.startswith("GIFT|"):
-            gift_id = data.split("|", 1)[1]
-            await selected_gift(query, context, gift_id)
-            return
-
-        if data == "GIFT_SELECTED":
-            data_user = user_data.get(query.from_user.id)
-            if not data_user:
-                await safe_edit(
-                    query,
-                    "❌ Сначала выберите подарок.",
-                    back_keyboard("GIFT_FRIEND"),
-                )
-                return
-
-            # Повторно показываем выбранный подарок.
-            await selected_gift(
-                query,
-                context,
-                data_user["gift_id"],
-            )
-            return
-
-        if data == "GIFT_SIGNATURE":
-            await gift_signature(query)
-            return
-
-        if data == "GIFT_START":
-            await gift_start(query)
-            return
-
-        # Restore
-        if data.startswith("RESTORE|"):
-            await restore(
-                query,
-                int(data.split("|")[1]),
-            )
-            return
-
-        # Admin
-        if data == "ADMIN":
-            await admin(query)
-            return
-
-        if data == "ADMIN_CREATE_DEF":
-            await admin_create_def(query)
-            return
-
-        if data == "ADMIN_CONFIRM_DEF":
-            await admin_confirm_def(query)
-            return
-
-        if data == "ADMIN_GIFT_PROMO":
-            await admin_gift_promo(query, context)
-            return
-
-        if data.startswith("ADMIN_GIFT|"):
-            gift_id = data.split("|", 1)[1]
-            await admin_select_gift(query, context, gift_id)
-            return
-
-        if data == "ADMIN_STATS":
-            await admin_stats(query)
-            return
-
-        if data == "ADMIN_STARS":
-            await admin_stars(query, context)
-            return
-
-        logger.warning("UNKNOWN CALLBACK: %s", data)
-
-    except Exception as error:
-        logger.exception("CALLBACK ERROR: %s", error)
-        try:
-            await query.answer(
-                "❌ Ошибка обработки кнопки.",
-                show_alert=True,
-            )
-        except Exception:
-            pass
-
-# ============================================================
-# PAYMENT ROUTER
-# ============================================================
-
-async def successful_payment_router(update, context):
-    payment = update.message.successful_payment
-
-    if payment.invoice_payload.startswith("giftpromo:"):
-        handled = await successful_admin_gift_promo(
-            update,
-            context,
-            payment,
+        until = int(
+            time.time() + 3600
         )
-        if handled:
-            return
 
-    if payment.invoice_payload.startswith("gift:"):
-        await successful_payment(update, context)
+        await context.bot.restrict_chat_member(
+            message.chat.id,
+            message.from_user.id,
+            permissions=ChatPermissions(
+                can_send_messages=False
+            ),
+            until_date=until
+        )
 
-# ============================================================
-# COMMANDS
-# ============================================================
+        await context.bot.send_message(
+            message.chat.id,
+            f"{display_name(message.from_user)} "
+            "был замучен на 1 час\n\n"
+            "Причина:реклама"
+        )
 
-async def lowerpension_command(update, context):
-    await pension(update, context)
+    except Exception as e:
 
+        print(
+            "Ошибка модерации:",
+            e
+        )
 
-async def top_command(update, context):
-    await top(update, context)
-
-# ============================================================
-# ERROR
-# ============================================================
-
-async def error_handler(update, context):
-    logger.exception(
-        "BOT ERROR",
-        exc_info=context.error,
-    )
 
 # ============================================================
-# MAIN
+# ЗАПУСК
 # ============================================================
+
 
 def main():
-    if TOKEN.startswith("ВСТАВЬ_"):
-        print("❌ Вставьте новый токен в переменную TOKEN.")
-        return
 
-    application = (
-        Application.builder()
+    app = (
+        Application
+        .builder()
         .token(TOKEN)
         .build()
     )
 
-    # /start
-    application.add_handler(
-        CommandHandler("start", start),
-        group=0,
+    # Команды
+    app.add_handler(
+        CommandHandler(
+            "start",
+            start
+        )
     )
 
-    # English commands
-    application.add_handler(
-        CommandHandler("lowerpension", lowerpension_command),
-        group=0,
+    app.add_handler(
+        CommandHandler(
+            "admin",
+            admin
+        )
     )
 
-    application.add_handler(
-        CommandHandler("top", top_command),
-        group=0,
+    app.add_handler(
+        CommandHandler(
+            "top",
+            top
+        )
     )
 
-    # Buttons
-    application.add_handler(
-        CallbackQueryHandler(callback_handler),
-        group=0,
+    app.add_handler(
+        CommandHandler(
+            "rules",
+            rules
+        )
     )
 
-    # Payments
-    application.add_handler(
-        PreCheckoutQueryHandler(pre_checkout),
-        group=0,
+    # Оплата
+    app.add_handler(
+        PreCheckoutQueryHandler(
+            pre_checkout
+        )
     )
 
-    application.add_handler(
+    app.add_handler(
         MessageHandler(
             filters.SUCCESSFUL_PAYMENT,
-            successful_payment_router,
-        ),
-        group=0,
+            successful_payment
+        )
     )
 
-    # New members
-    application.add_handler(
+    # Кнопки
+    app.add_handler(
+        CallbackQueryHandler(
+            catalog,
+            pattern="^catalog$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            catalog_product,
+            pattern="^catalog_"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            gift_menu,
+            pattern="^gift$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            gift_self,
+            pattern="^gift_self$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            gift_friend,
+            pattern="^gift_friend$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            gift_self_selected,
+            pattern="^giftself:"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            gift_friend_selected,
+            pattern="^giftfriend:"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            promo,
+            pattern="^promo$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            def_order,
+            pattern="^def_order$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            def_confirm,
+            pattern="^def_confirm$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            def_yes,
+            pattern="^def_yes$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            question,
+            pattern="^question$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            restore,
+            pattern="^restore:"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            admin_promo,
+            pattern="^admin_promo$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            main_callback,
+            pattern="^main$"
+        )
+    )
+
+    # Новые участники
+    app.add_handler(
         MessageHandler(
             filters.StatusUpdate.NEW_CHAT_MEMBERS,
-            new_member,
-        ),
-        group=1,
+            welcome
+        )
     )
 
-    # Admin replies must be before generic private handler.
-    application.add_handler(
+    # Модерация ссылок
+    app.add_handler(
         MessageHandler(
-            filters.ChatType.PRIVATE
-            & filters.REPLY
-            & filters.ALL,
-            admin_reply,
+            filters.ChatType.GROUPS
+            & (
+                filters.TEXT
+                | filters.CAPTION
+            ),
+            link_moderation
         ),
-        group=2,
+        group=0
     )
 
-    # Private text / media routing.
-    application.add_handler(
+    # Обычный текст
+    app.add_handler(
         MessageHandler(
-            filters.ChatType.PRIVATE
+            filters.TEXT
             & ~filters.COMMAND,
-            private_message_router,
+            text_handler
         ),
-        group=5,
+        group=1
     )
 
-    # Rules / game / moderation.
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & filters.TEXT
-            & filters.Regex(
-                r"(?is)^\s*обн\s+правила\b"
-            ),
-            update_rules_command,
-        ),
-        group=6,
-    )
+    print("Ceko Hub запущен.")
 
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & filters.TEXT
-            & filters.Regex(
-                r"(?i)^\s*ппб\s*$"
-            ),
-            pension,
-        ),
-        group=7,
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & filters.TEXT
-            & filters.Regex(
-                r"(?i)^\s*понизить пенсию бабушкам\s*$"
-            ),
-            pension,
-        ),
-        group=7,
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & filters.TEXT
-            & filters.Regex(
-                r"(?i)^\s*топ\s*$"
-            ),
-            top,
-        ),
-        group=7,
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & filters.TEXT
-            & ~filters.COMMAND,
-            group_chat,
-        ),
-        group=10,
-    )
-
-    # Random Jerry.
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & filters.TEXT
-            & ~filters.COMMAND,
-            random_jerry,
-        ),
-        group=11,
-    )
-
-    # Channel discussion automatic replies.
-    application.add_handler(
-        MessageHandler(
-            filters.ALL,
-            channel_auto_reply,
-        ),
-        group=12,
-    )
-
-    application.add_error_handler(error_handler)
-
-    print("========================================")
-    print("       CEKO HUB ЗАПУЩЕН")
-    print("========================================")
-    print("ADMIN:", ADMIN_ID)
-    print("DATABASE:", DB_FILE)
-    print("GIFTS: Telegram API")
-    print("PAYMENTS: Telegram Stars / XTR")
-    print("========================================")
-
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES
     )
 
 
