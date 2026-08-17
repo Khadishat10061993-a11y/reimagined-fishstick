@@ -27,7 +27,7 @@ from telegram.ext import (
 # CEKO HUB — FULL BOT
 # ============================================================
 
-TOKEN = "8905175157:AAEo3tBv5V1pJGbJwWRoRXojMyj5qaJAxfw"
+TOKEN = "8905175157:AAEXGCH_Cx2On1uH0JMuBoEuxDB3I2F52N0"
 ADMIN_ID = 8161017993
 
 ADMIN_USERNAME = "@netuzu"
