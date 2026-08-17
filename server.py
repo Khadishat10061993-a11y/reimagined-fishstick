@@ -1,34 +1,32 @@
-from flask import Flask, request, jsonify, send_from_directory
-import threading
+from flask import Flask, request, jsonify, send_file
 import os
-import bot
 
-app = Flask(__name__, static_folder=".")
+app = Flask(__name__)
 
 
 # =========================
-# ГЛАВНАЯ СТРАНИЦА
+# САЙТ
 # =========================
 
 @app.route("/")
-def index():
-    return send_from_directory(".", "index.html")
+def home():
+    return send_file("index.html")
 
 
 # =========================
-# ПРОВЕРКА СЕРВЕРА
+# ПРОВЕРКА
 # =========================
 
 @app.route("/health")
 def health():
     return jsonify({
-        "status": "ok",
-        "service": "Ceko Hub"
+        "ok": True,
+        "message": "Ceko Hub server работает ✅"
     })
 
 
 # =========================
-# ОПЛАТА
+# СОЗДАНИЕ ПЛАТЕЖА
 # =========================
 
 @app.route("/api/create-payment", methods=["POST"])
@@ -51,23 +49,19 @@ def create_payment():
     if not amount or not stars:
         return jsonify({
             "ok": False,
-            "message": "Некорректные данные покупки"
+            "message": "Неверная сумма"
         }), 400
 
-    # Здесь создаётся заявка.
-    #
-    # Реальную оплату Stars нужно создавать через Telegram Bot API
-    # внутри bot.py, потому что именно бот получает
-    # successful_payment и после этого выдаёт товар.
+    print("НОВЫЙ ЗАКАЗ")
+    print("Тип:", payment_type)
+    print("Количество:", amount)
+    print("Stars:", stars)
+    print("Получатель:", target)
+    print("Username:", username)
 
     return jsonify({
         "ok": True,
-        "message": "Заявка создана",
-        "type": payment_type,
-        "amount": amount,
-        "stars": stars,
-        "target": target,
-        "username": username
+        "message": "Заказ создан ✅"
     })
 
 
@@ -82,7 +76,7 @@ def promo():
 
     code = str(
         data.get("code", "")
-    ).strip().upper()
+    ).strip()
 
     if not code:
         return jsonify({
@@ -90,14 +84,11 @@ def promo():
             "message": "Введите промокод"
         }), 400
 
-    # Само хранение и активация промокодов
-    # должно находиться в bot.py,
-    # чтобы сайт нельзя было использовать
-    # для накрутки баланса.
+    print("ПРОМОКОД:", code)
 
     return jsonify({
         "ok": True,
-        "message": "Промокод отправлен на обработку"
+        "message": "Промокод отправлен боту"
     })
 
 
@@ -118,14 +109,16 @@ def order():
             "message": "Количество Деф не указано"
         }), 400
 
+    print("ЗАКАЗ ДЕФ:", amount)
+
     return jsonify({
         "ok": True,
-        "message": "Заявка на заказ отправлена"
+        "message": "Заявка отправлена ✅"
     })
 
 
 # =========================
-# ВОПРОС К CEKO
+# ВОПРОС
 # =========================
 
 @app.route("/api/question", methods=["POST"])
@@ -143,49 +136,33 @@ def question():
             "message": "Введите вопрос"
         }), 400
 
-    # Вопрос должен передаваться в bot.py,
-    # где он отправляется администратору.
+    print("ВОПРОС:")
+    print(text)
 
     return jsonify({
         "ok": True,
-        "message": "Вопрос отправлен администратору ✅"
+        "message": "Вопрос отправлен ✅"
     })
 
 
 # =========================
-# ЗАПУСК БОТА
-# =========================
-
-def run_bot():
-
-    try:
-        bot.main()
-    except Exception as e:
-        print("Ошибка запуска бота:", e)
-
-
-# =========================
-# ЗАПУСК СЕРВЕРА
+# ЗАПУСК
 # =========================
 
 if __name__ == "__main__":
-
-    threading.Thread(
-        target=run_bot,
-        daemon=True
-    ).start()
 
     port = int(
         os.environ.get("PORT", 8080)
     )
 
     print("================================")
-    print(" Ceko Hub server")
-    print(" Server started")
-    print(" Port:", port)
+    print("       CEKO HUB SERVER")
     print("================================")
+    print("PORT:", port)
+    print("SERVER STARTED ✅")
 
     app.run(
         host="0.0.0.0",
-        port=port
+        port=port,
+        debug=False
     )
