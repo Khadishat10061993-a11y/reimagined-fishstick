@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<title>Ceko Hub</title>
+
+<style>
+
+*{
+    box-sizing:border-box;
+    margin:0;
+    padding:0;
+    font-family:Arial,sans-serif;
+}
+
+body{
+    min-height:100vh;
+    background:
+        radial-gradient(circle at top,#202020,#080808 60%);
+    color:white;
+    overflow-x:hidden;
+}
+
+button{
+    border:0;
+    cursor:pointer;
+}
+
+.header{
+    padding:25px 20px;
+    text-align:center;
+}
+
+.logo{
+    font-size:34px;
+    font-weight:900;
+    letter-spacing:2px;
+}
+
+.logo span{
+    color:#7cff00;
+}
+
+.subtitle{
+    margin-top:8px;
+    color:#aaa;
+}
+
+.balance{
+    margin:20px auto;
+    max-width:500px;
+    padding:18px;
+    border:1px solid #303030;
+    border-radius:18px;
+    background:#111;
+    box-shadow:0 0 30px rgba(124,255,0,.08);
+}
+
+.balance-title{
+    color:#999;
+    font-size:13px;
+}
+
+.balance-value{
+    margin-top:5px;
+    font-size:28px;
+    font-weight:bold;
+}
+
+.container{
+    width:min(900px,94%);
+    margin:auto;
+}
+
+.menu{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:14px;
+}
+
+.card{
+    padding:25px;
+    min-height:120px;
+    background:linear-gradient(145deg,#171717,#0e0e0e);
+    border:1px solid #292929;
+    border-radius:22px;
+    color:white;
+    text-align:left;
+    transition:.2s;
+}
+
+.card:hover{
+    transform:translateY(-5px);
+    border-color:#7cff00;
+    box-shadow:0 10px 35px rgba(124,255,0,.1);
+}
+
+.card-icon{
+    font-size:30px;
+}
+
+.card-title{
+    margin-top:12px;
+    font-size:18px;
+    font-weight:bold;
+}
+
+.card-description{
+    margin-top:5px;
+    color:#888;
+    font-size:13px;
+}
+
+.page{
+    display:none;
+    animation:pageIn .3s ease;
+}
+
+.page.active{
+    display:block;
+}
+
+@keyframes pageIn{
+    from{
+        opacity:0;
+        transform:translateY(15px);
+    }
+
+    to{
+        opacity:1;
+        transform:translateY(0);
+    }
+}
+
+.back{
+    display:inline-flex;
+    margin-bottom:20px;
+    padding:10px 16px;
+    border-radius:12px;
+    background:#1b1b1b;
+    color:white;
+}
+
+.page-title{
+    font-size:28px;
+    margin-bottom:8px;
+}
+
+.page-subtitle{
+    color:#888;
+    margin-bottom:20px;
+}
+
+.products{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:14px;
+}
+
+.product{
+    padding:20px;
+    border-radius:18px;
+    background:#121212;
+    border:1px solid #282828;
+}
+
+.product h3{
+    margin-bottom:8px;
+}
+
+.product p{
+    color:#999;
+    margin-bottom:16px;
+}
+
+.buy{
+    width:100%;
+    padding:13px;
+    border-radius:12px;
+    background:#7cff00;
+    color:#000;
+    font-weight:bold;
+}
+
+.buy:hover{
+    filter:brightness(1.1);
+}
+
+.form{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+
+input,textarea{
+    width:100%;
+    padding:15px;
+    border-radius:14px;
+    border:1px solid #303030;
+    background:#111;
+    color:white;
+    outline:none;
+}
+
+textarea{
+    min-height:130px;
+    resize:vertical;
+}
+
+.submit{
+    padding:15px;
+    border-radius:14px;
+    background:#7cff00;
+    color:#000;
+    font-weight:bold;
+}
+
+.notice{
+    padding:16px;
+    margin-bottom:20px;
+    background:#151515;
+    border:1px solid #292929;
+    border-radius:15px;
+    color:#aaa;
+}
+
+.gift{
+    padding:20px;
+    background:#121212;
+    border:1px solid #292929;
+    border-radius:18px;
+    margin-bottom:12px;
+}
+
+.gift button{
+    margin-top:12px;
+}
+
+.footer{
+    text-align:center;
+    padding:35px;
+    color:#555;
+}
+
+.toast{
+    position:fixed;
+    left:50%;
+    bottom:25px;
+    transform:translateX(-50%) translateY(100px);
+    background:#181818;
+    border:1px solid #333;
+    padding:15px 20px;
+    border-radius:14px;
+    transition:.3s;
+    z-index:999;
+}
+
+.toast.show{
+    transform:translateX(-50%) translateY(0);
+}
+
+@media(max-width:650px){
+
+    .menu{
+        grid-template-columns:1fr;
+    }
+
+    .products{
+        grid-template-columns:1fr;
+    }
+
+    .logo{
+        font-size:28px;
+    }
+}
+
+</style>
+</head>
+
+<body>
+
+<header class="header">
+
+    <div class="logo">
+        🔰 Ceko <span>Hub</span>
+    </div>
+
+    <div class="subtitle">
+        Магазин Деф-очков
+    </div>
+
+</header>
+
+
+<div class="container">
+
+<!-- ================= ГЛАВНАЯ ================= -->
+
+<section id="home" class="page active">
+
+    <div class="balance">
+
+        <div class="balance-title">
+            Ваш баланс
+        </div>
+
+        <div class="balance-value">
+            💎 <span id="balance">0</span> Деф
+        </div>
+
+    </div>
+
+
+    <div class="menu">
+
+        <button class="card" onclick="openPage('catalog')">
+
+            <div class="card-icon">
+                🫀
+            </div>
+
+            <div class="card-title">
+                Каталог
+            </div>
+
+            <div class="card-description">
+                Купить Деф-очки
+            </div>
+
+        </button>
+
+
+        <button class="card" onclick="openPage('promo')">
+
+            <div class="card-icon">
+                🫆
+            </div>
+
+            <div class="card-title">
+                Промокод
+            </div>
+
+            <div class="card-description">
+                Активировать промокод
+            </div>
+
+        </button>
+
+
+        <button class="card" onclick="openPage('order')">
+
+            <div class="card-icon">
+                👾
+            </div>
+
+            <div class="card-title">
+                Заказать Деф
+            </div>
+
+            <div class="card-description">
+                Оформить заказ
+            </div>
+
+        </button>
+
+
+        <button class="card" onclick="openPage('gift')">
+
+            <div class="card-icon">
+                🎁
+            </div>
+
+            <div class="card-title">
+                Подарок
+            </div>
+
+            <div class="card-description">
+                Подарить Деф другу
+            </div>
+
+        </button>
+
+
+        <button class="card"
+        onclick="window.open('https://t.me/+lyHMe0599OtjYjEy','_blank')">
+
+            <div class="card-icon">
+                💬
+            </div>
+
+            <div class="card-title">
+                Секрет ТГК
+            </div>
+
+            <div class="card-description">
+                Перейти в Telegram
+            </div>
+
+        </button>
+
+
+        <button class="card" onclick="openPage('question')">
+
+            <div class="card-icon">
+                🔰
+            </div>
+
+            <div class="card-title">
+                Вопрос к Ceko
+            </div>
+
+            <div class="card-description">
+                Написать администратору
+            </div>
+
+        </button>
+
+    </div>
+
+</section>
+
+
+<!-- ================= КАТАЛОГ ================= -->
+
+<section id="catalog" class="page">
+
+<button class="back" onclick="openPage('home')">
+    ← Назад
+</button>
+
+<h1 class="page-title">
+    🤖 Каталог валюты
+</h1>
+
+<p class="page-subtitle">
+    Действуют скидки — навсегда
+</p>
+
+
+<div class="products">
+
+<div class="product">
+
+<h3>💎 1 Деф</h3>
+
+<p>
+1 ⭐
+</p>
+
+<button class="buy"
+onclick="buyDef(1,1)">
+Купить
+</button>
+
+</div>
+
+
+<div class="product">
+
+<h3>💎 10 Деф</h3>
+
+<p>
+5 ⭐
+</p>
+
+<button class="buy"
+onclick="buyDef(10,5)">
+Купить
+</button>
+
+</div>
+
+
+<div class="product">
+
+<h3>💎 25 Деф</h3>
+
+<p>
+10 ⭐
+</p>
+
+<button class="buy"
+onclick="buyDef(25,10)">
+Купить
+</button>
+
+</div>
+
+
+<div class="product">
+
+<h3>💎 50 Деф</h3>
+
+<p>
+40 ⭐
+</p>
+
+<button class="buy"
+onclick="buyDef(50,40)">
+Купить
+</button>
+
+</div>
+
+</div>
+
+</section>
+
+
+<!-- ================= ПРОМО ================= -->
+
+<section id="promo" class="page">
+
+<button class="back" onclick="openPage('home')">
+← Назад
+</button>
+
+<h1 class="page-title">
+🫆 Промокод
+</h1>
+
+<p class="page-subtitle">
+Введите промокод для получения Деф
+</p>
+
+
+<form class="form" onsubmit="activatePromo(event)">
+
+<input
+id="promoInput"
+placeholder="Введите промокод"
+required
+>
+
+<button class="submit">
+Активировать
+</button>
+
+</form>
+
+</section>
+
+
+<!-- ================= ЗАКАЗ ================= -->
+
+<section id="order" class="page">
+
+<button class="back" onclick="openPage('home')">
+← Назад
+</button>
+
+<h1 class="page-title">
+👾 Заказать Деф
+</h1>
+
+<div class="notice">
+
+Выберите количество Деф для заказа.
+
+</div>
+
+
+<div class="products">
+
+<div class="product">
+
+<h3>
+1 Деф
+</h3>
+
+<p>
+Стоимость: 1 Деф
+</p>
+
+<button
+class="buy"
+onclick="createOrder(1)"
+>
+Заказать
+</button>
+
+</div>
+
+</div>
+
+</section>
+
+
+<!-- ================= ПОДАРОК ================= -->
+
+<section id="gift" class="page">
+
+<button class="back" onclick="openPage('home')">
+← Назад
+</button>
+
+<h1 class="page-title">
+🎁 Подарок
+</h1>
+
+<p class="page-subtitle">
+Выберите подарок
+</p>
+
+
+<div class="gift">
+
+<h3>
+👤 Подарить себе
+</h3>
+
+<button
+class="buy"
+onclick="openPage('giftSelf')"
+>
+Выбрать
+</button>
+
+</div>
+
+
+<div class="gift">
+
+<h3>
+👥 Подарить другу
+</h3>
+
+<button
+class="buy"
+onclick="openPage('giftFriend')"
+>
+Выбрать
+</button>
+
+</div>
+
+</section>
+
+
+<!-- ================= СЕБЕ ================= -->
+
+<section id="giftSelf" class="page">
+
+<button class="back" onclick="openPage('gift')">
+← Назад
+</button>
+
+<h1 class="page-title">
+🎁 Себе
+</h1>
+
+
+<div class="products">
+
+<div class="product">
+
+<h3>
+1 Деф
+</h3>
+
+<p>
+1 ⭐
+</p>
+
+<button
+class="buy"
+onclick="buyGift('self',1,1)"
+>
+Оплатить
+</button>
+
+</div>
+
+
+<div class="product">
+
+<h3>
+10 Деф
+</h3>
+
+<p>
+5 ⭐
+</p>
+
+<button
+class="buy"
+onclick="buyGift('self',10,5)"
+>
+Оплатить
+</button>
+
+</div>
+
+
+<div class="product">
+
+<h3>
+25 Деф
+</h3>
+
+<p>
+10 ⭐
+</p>
+
+<button
+class="buy"
+onclick="buyGift('self',25,10)"
+>
+Оплатить
+</button>
+
+</div>
+
+
+<div class="product">
+
+<h3>
+50 Деф
+</h3>
+
+<p>
+40 ⭐
+</p>
+
+<button
+class="buy"
+onclick="buyGift('self',50,40)"
+>
+Оплатить
+</button>
+
+</div>
+
+</div>
+
+</section>
+
+
+<!-- ================= ДРУГУ ================= -->
+
+<section id="giftFriend" class="page">
+
+<button class="back" onclick="openPage('gift')">
+← Назад
+</button>
+
+<h1 class="page-title">
+👥 Для друга
+</h1>
+
+<form
+class="form"
+onsubmit="giftFriend(event)"
+>
+
+<input
+id="friendUsername"
+placeholder="@username"
+required
+>
+
+<select
+id="friendAmount"
+style="
+padding:15px;
+border-radius:14px;
+background:#111;
+color:white;
+border:1px solid #303030;
+">
+
+<option value="1">
+1 Деф — 1 ⭐
+</option>
+
+<option value="10">
+10 Деф — 5 ⭐
+</option>
+
+<option value="25">
+25 Деф — 10 ⭐
+</option>
+
+<option value="50">
+50 Деф — 40 ⭐
+</option>
+
+</select>
+
+
+<button class="submit">
+🎁 Продолжить
+</button>
+
+</form>
+
+</section>
+
+
+<!-- ================= ВОПРОС ================= -->
+
+<section id="question" class="page">
+
+<button class="back" onclick="openPage('home')">
+← Назад
+</button>
+
+<h1 class="page-title">
+🔰 Вопрос к Ceko
+</h1>
+
+<p class="page-subtitle">
+Напишите свой вопрос
+</p>
+
+
+<form
+class="form"
+onsubmit="sendQuestion(event)"
+>
+
+<textarea
+id="questionText"
+placeholder="Ваш вопрос..."
+required
+></textarea>
+
+<button class="submit">
+Отправить
+</button>
+
+</form>
+
+</section>
+
+</div>
+
+
+<footer class="footer">
+    Ceko Hub © 2026
+</footer>
+
+
+<div id="toast" class="toast">
+Готово
+</div>
+
+
+<script>
+
+const API = "";
+
+
+// ===============================
+// ЗВУК
+// ===============================
+
+function sound(){
+
+    try{
+
+        const ctx =
+        new (window.AudioContext ||
+        window.webkitAudioContext)();
+
+        const osc =
+        ctx.createOscillator();
+
+        const gain =
+        ctx.createGain();
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.frequency.value = 600;
+
+        gain.gain.setValueAtTime(
+            .08,
+            ctx.currentTime
+        );
+
+        gain.gain.exponentialRampToValueAtTime(
+            .001,
+            ctx.currentTime+.12
+        );
+
+        osc.start();
+
+        osc.stop(
+            ctx.currentTime+.12
+        );
+
+    }catch(e){}
+
+}
+
+
+// ===============================
+// НАВИГАЦИЯ
+// ===============================
+
+function openPage(id){
+
+    sound();
+
+    document
+    .querySelectorAll(".page")
+    .forEach(page=>{
+        page.classList.remove("active");
+    });
+
+    const page =
+    document.getElementById(id);
+
+    if(page){
+        page.classList.add("active");
+    }
+
+    window.scrollTo({
+        top:0,
+        behavior:"smooth"
+    });
+}
+
+
+// ===============================
+// TOAST
+// ===============================
+
+function toast(text){
+
+    const element =
+    document.getElementById("toast");
+
+    element.textContent = text;
+
+    element.classList.add("show");
+
+    setTimeout(()=>{
+        element.classList.remove("show");
+    },2500);
+
+}
+
+
+// ===============================
+// API
+// ===============================
+
+async function request(
+    url,
+    options={}
+){
+
+    try{
+
+        const response =
+        await fetch(
+            API+url,
+            {
+                ...options,
+                headers:{
+                    "Content-Type":
+                    "application/json",
+                    ...(options.headers||{})
+                }
+            }
+        );
+
+        if(!response.ok){
+            throw new Error();
+        }
+
+        return await response.json();
+
+    }catch(error){
+
+        toast(
+            "Сервер недоступен"
+        );
+
+        return null;
+
+    }
+
+}
+
+
+// ===============================
+// КУПИТЬ ДЕФ
+// ===============================
+
+async function buyDef(
+    amount,
+    stars
+){
+
+    sound();
+
+    const result =
+    await request(
+        "/api/create-payment",
+        {
+            method:"POST",
+
+            body:JSON.stringify({
+                type:"def",
+                amount:amount,
+                stars:stars
+            })
+        }
+    );
+
+    if(result){
+
+        if(result.telegram_url){
+
+            window.open(
+                result.telegram_url,
+                "_blank"
+            );
+
+        }else{
+
+            toast(
+                "Откройте оплату через Telegram"
+            );
+
+        }
+
+    }
+
+}
+
+
+// ===============================
+// ПОДАРОК
+// ===============================
+
+async function buyGift(
+    target,
+    amount,
+    stars
+){
+
+    sound();
+
+    const result =
+    await request(
+        "/api/create-payment",
+        {
+            method:"POST",
+
+            body:JSON.stringify({
+                type:"gift",
+                target:target,
+                amount:amount,
+                stars:stars
+            })
+        }
+    );
+
+    if(result){
+
+        if(result.telegram_url){
+
+            window.open(
+                result.telegram_url,
+                "_blank"
+            );
+
+        }else{
+
+            toast(
+                "Откройте оплату через Telegram"
+            );
+
+        }
+
+    }
+
+}
+
+
+// ===============================
+// ДРУГ
+// ===============================
+
+async function giftFriend(event){
+
+    event.preventDefault();
+
+    sound();
+
+    const username =
+    document
+    .getElementById(
+        "friendUsername"
+    )
+    .value
+    .trim();
+
+    const amount =
+    Number(
+        document
+        .getElementById(
+            "friendAmount"
+        )
+        .value
+    );
+
+    const prices = {
+        1:1,
+        10:5,
+        25:10,
+        50:40
+    };
+
+    const stars =
+    prices[amount];
+
+    const result =
+    await request(
+        "/api/create-payment",
+        {
+            method:"POST",
+
+            body:JSON.stringify({
+
+                type:"gift",
+
+                target:"friend",
+
+                username:username,
+
+                amount:amount,
+
+                stars:stars
+
+            })
+        }
+    );
+
+    if(result){
+
+        if(result.telegram_url){
+
+            window.open(
+                result.telegram_url,
+                "_blank"
+            );
+
+        }else{
+
+            toast(
+                "Заявка создана"
+            );
+
+        }
+
+    }
+
+}
+
+
+// ===============================
+// ПРОМОКОД
+// ===============================
+
+async function activatePromo(event){
+
+    event.preventDefault();
+
+    sound();
+
+    const code =
+    document
+    .getElementById(
+        "promoInput"
+    )
+    .value
+    .trim();
+
+    const result =
+    await request(
+        "/api/promo",
+        {
+            method:"POST",
+
+            body:JSON.stringify({
+                code:code
+            })
+        }
+    );
+
+    if(result){
+
+        toast(
+            result.message ||
+            "Промокод обработан"
+        );
+
+    }
+
+}
+
+
+// ===============================
+// ЗАКАЗ
+// ===============================
+
+async function createOrder(amount){
+
+    sound();
+
+    const result =
+    await request(
+        "/api/order",
+        {
+            method:"POST",
+
+            body:JSON.stringify({
+                amount:amount
+            })
+        }
+    );
+
+    if(result){
+
+        toast(
+            result.message ||
+            "Заявка отправлена"
+        );
+
+    }
+
+}
+
+
+// ===============================
+// ВОПРОС
+// ===============================
+
+async function sendQuestion(event){
+
+    event.preventDefault();
+
+    sound();
+
+    const text =
+    document
+    .getElementById(
+        "questionText"
+    )
+    .value
+    .trim();
+
+    const result =
+    await request(
+        "/api/question",
+        {
+            method:"POST",
+
+            body:JSON.stringify({
+                text:text
+            })
+        }
+    );
+
+    if(result){
+
+        document
+        .getElementById(
+            "questionText"
+        )
+        .value="";
+
+        toast(
+            "Вопрос отправлен ✅"
+        );
+
+    }
+
+}
+
+</script>
+
+</body>
+</html>
