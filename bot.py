@@ -25,7 +25,7 @@ from telegram.ext import (
 # НАСТРОЙКИ
 # ============================================================
 
-TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН"
+TOKEN = "8905175157:AAEo3tBv5V1pJGbJwWRoRXojMyj5qaJAxfw"
 
 ADMIN_ID = 8161017993
 
