@@ -20,17 +20,17 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
-    BusinessConnectionHandler,
-    BusinessMessagesDeletedHandler,
 )
 
 # ============================================================
 # CEKO HUB — FULL BOT
-# SECRETARY MODE — ONLY PRIVATE BUSINESS CHATS
-# python-telegram-bot >= 22.8
 # ============================================================
 
-TOKEN = "8905175157:AAEXGCH_Cx2On1uH0JMuBoEuxDB3I2F52N0"
+TOKEN = "ВСТАВЬ_НОВЫЙ_ТОКЕН_ОТ_BOTFATHER"
+
+# ============================================================
+# ADMINS
+# ============================================================
 
 ADMIN_IDS = [8161017993, 8961670797]
 ADMIN_ID = ADMIN_IDS[0]
@@ -47,6 +47,10 @@ DB_FILE = "ceko.db"
 
 PENSION_COOLDOWN = 120
 
+# ============================================================
+# LOGGING
+# ============================================================
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -60,11 +64,12 @@ logger = logging.getLogger("CEKO")
 
 db = sqlite3.connect(
     DB_FILE,
-    check_same_thread=False,
+    check_same_thread=False
 )
 
 db.row_factory = sqlite3.Row
 
+# USERS
 db.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -77,6 +82,7 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
+# PROMOS
 db.execute("""
 CREATE TABLE IF NOT EXISTS promos (
     code TEXT PRIMARY KEY,
@@ -85,6 +91,7 @@ CREATE TABLE IF NOT EXISTS promos (
 )
 """)
 
+# SETTINGS
 db.execute("""
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -92,43 +99,37 @@ CREATE TABLE IF NOT EXISTS settings (
 )
 """)
 
-# ------------------------------------------------------------
-# SECRETARY MODE DATABASE
-# ------------------------------------------------------------
-
+# MESSAGE LOG
 db.execute("""
-CREATE TABLE IF NOT EXISTS business_connections (
-    connection_id TEXT PRIMARY KEY,
-    owner_id INTEGER NOT NULL,
-    owner_username TEXT DEFAULT '',
-    owner_name TEXT DEFAULT '',
-    user_chat_id INTEGER,
-    is_enabled INTEGER DEFAULT 1,
-    can_reply INTEGER DEFAULT 0,
-    can_read_messages INTEGER DEFAULT 0,
-    can_delete_sent_messages INTEGER DEFAULT 0,
-    can_delete_all_messages INTEGER DEFAULT 0,
-    updated_at INTEGER DEFAULT 0
-)
-""")
-
-db.execute("""
-CREATE TABLE IF NOT EXISTS business_messages (
-    connection_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS message_log (
     chat_id INTEGER NOT NULL,
     message_id INTEGER NOT NULL,
     user_id INTEGER,
     username TEXT DEFAULT '',
     first_name TEXT DEFAULT '',
     text TEXT DEFAULT '',
-    caption TEXT DEFAULT '',
-    message_type TEXT DEFAULT 'unknown',
+    message_type TEXT DEFAULT 'text',
     created_at INTEGER DEFAULT 0,
-    PRIMARY KEY(connection_id, chat_id, message_id)
+    edited_at INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, message_id)
+)
+""")
+
+# SECRETARY CHATS
+db.execute("""
+CREATE TABLE IF NOT EXISTS secretary_chats (
+    chat_id INTEGER PRIMARY KEY,
+    title TEXT DEFAULT '',
+    enabled INTEGER DEFAULT 1,
+    added_at INTEGER DEFAULT 0
 )
 """)
 
 db.commit()
+
+# ============================================================
+# DEFAULT RULES
+# ============================================================
 
 DEFAULT_RULES = """📜 ПРАВИЛА ЧАТА CEKO
 
@@ -146,7 +147,7 @@ db.execute(
 db.commit()
 
 # ============================================================
-# RUNTIME STATES
+# RUNTIME
 # ============================================================
 
 user_states = {}
@@ -170,7 +171,15 @@ def ensure_user(user):
     db.execute(
         """
         INSERT OR IGNORE INTO users
-        (user_id, username, first_name, balance, pension, pension_until, broken)
+        (
+            user_id,
+            username,
+            first_name,
+            balance,
+            pension,
+            pension_until,
+            broken
+        )
         VALUES (?, ?, ?, 0, 0, 0, 0)
         """,
         (
@@ -183,7 +192,8 @@ def ensure_user(user):
     db.execute(
         """
         UPDATE users
-        SET username=?, first_name=?
+        SET username=?,
+            first_name=?
         WHERE user_id=?
         """,
         (
@@ -207,9 +217,14 @@ def get_balance(user_id):
 
 def add_balance(user_id, amount):
     db.execute(
-        "UPDATE users SET balance=balance+? WHERE user_id=?",
+        """
+        UPDATE users
+        SET balance=balance+?
+        WHERE user_id=?
+        """,
         (amount, user_id),
     )
+
     db.commit()
 
 
@@ -218,7 +233,8 @@ def take_balance(user_id, amount):
         """
         UPDATE users
         SET balance=balance-?
-        WHERE user_id=? AND balance>=?
+        WHERE user_id=?
+        AND balance>=?
         """,
         (
             amount,
@@ -237,7 +253,9 @@ def find_user_by_username(username):
 
     row = db.execute(
         """
-        SELECT user_id, username, first_name
+        SELECT user_id,
+               username,
+               first_name
         FROM users
         WHERE lower(username)=?
         """,
@@ -273,7 +291,11 @@ def mention(user):
 
 def get_rules():
     row = db.execute(
-        "SELECT value FROM settings WHERE key='rules'"
+        """
+        SELECT value
+        FROM settings
+        WHERE key='rules'
+        """
     ).fetchone()
 
     return row["value"] if row else DEFAULT_RULES
@@ -296,10 +318,17 @@ def set_rules(text):
 # ============================================================
 
 def generate_username(length: int) -> str:
-    chars = string.ascii_lowercase + string.digits
+
+    chars = (
+        string.ascii_lowercase +
+        string.digits
+    )
 
     username = "".join(
-        random.choices(chars, k=length)
+        random.choices(
+            chars,
+            k=length,
+        )
     )
 
     if username[0].isdigit():
@@ -321,56 +350,63 @@ def main_keyboard(user_id):
         [
             InlineKeyboardButton(
                 "🫀 Каталог",
-                callback_data="CATALOG",
+                callback_data="CATALOG"
             ),
             InlineKeyboardButton(
                 "🫆 Промокод",
-                callback_data="PROMO",
+                callback_data="PROMO"
             ),
         ],
+
         [
             InlineKeyboardButton(
                 "👾 Заказать Деф",
-                callback_data="ORDER",
-            ),
+                callback_data="ORDER"
+            )
         ],
+
         [
             InlineKeyboardButton(
                 "🫆 Искатель Юзеров",
-                callback_data="USER_SEARCH",
-            ),
+                callback_data="USER_SEARCH"
+            )
         ],
+
         [
             InlineKeyboardButton(
-                "🕵️ Секретарь Мод",
-                callback_data="SECRETARY",
-            ),
+                "🛡 Секретарь мод",
+                callback_data="SECRETARY"
+            )
         ],
+
         [
             InlineKeyboardButton(
                 "💬 Секрет Тгк",
-                callback_data="CHANNEL",
-            ),
+                callback_data="CHANNEL"
+            )
         ],
+
         [
             InlineKeyboardButton(
                 "🔰 Вопрос к Ceko",
-                callback_data="QUESTION",
-            ),
+                callback_data="QUESTION"
+            )
         ],
+
         [
             InlineKeyboardButton(
                 f"💰 Баланс: {get_balance(user_id)}",
-                callback_data="BALANCE",
+                callback_data="BALANCE"
             ),
         ],
     ]
 
     if is_admin(user_id):
+
         rows.append([
             InlineKeyboardButton(
                 "🔐 Панель администратора",
-                callback_data="ADMIN",
+                callback_data="ADMIN"
             )
         ])
 
@@ -378,40 +414,54 @@ def main_keyboard(user_id):
 
 
 def back_keyboard(target="BACK"):
+
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data=target,
+                callback_data=target
             )
         ]
     ])
 
 
-async def safe_edit(query, text, keyboard=None):
+async def safe_edit(
+    query,
+    text,
+    keyboard=None
+):
+
     try:
+
         await query.edit_message_text(
             text=text,
             reply_markup=keyboard,
         )
+
         return
+
     except Exception:
         pass
 
     try:
+
         await query.message.reply_text(
             text=text,
             reply_markup=keyboard,
         )
+
     except Exception:
         pass
 
 
 # ============================================================
-# START / MAIN MENU
+# START
 # ============================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     user = update.effective_user
 
@@ -431,7 +481,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if os.path.isfile(START_PHOTO):
 
-        with open(START_PHOTO, "rb") as photo:
+        with open(
+            START_PHOTO,
+            "rb"
+        ) as photo:
 
             await update.message.reply_photo(
                 photo=photo,
@@ -469,7 +522,10 @@ async def main_menu(query):
 
     if os.path.isfile(START_PHOTO):
 
-        with open(START_PHOTO, "rb") as photo:
+        with open(
+            START_PHOTO,
+            "rb"
+        ) as photo:
 
             await query.message.chat.send_photo(
                 photo=photo,
@@ -486,773 +542,588 @@ async def main_menu(query):
 
 
 # ============================================================
-# SECRETARY MODE MENU
+# SECRETARY
 # ============================================================
 
 async def secretary_menu(query):
 
-    text = (
-        "🕵️ СЕКРЕТАРЬ МОД\n\n"
+    text = """🛡 СЕКРЕТАРЬ МОД
 
-        "Это режим секретаря для личных чатов "
-        "через Telegram Business.\n\n"
+Секретарь — система контроля сообщений.
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
+📌 ЧТО ОН УМЕЕТ:
 
-        "📌 ЧТО УМЕЕТ\n\n"
+✏️ Отслеживать изменения сообщений.
 
-        "✏️ Изменённые сообщения\n"
-        "Бот запоминает старую версию сообщения "
-        "и сообщает об изменении.\n\n"
+🗃 Запоминать сообщения, которые бот получил.
 
-        "🗑️ Удалённые сообщения\n"
-        "Бот заранее сохраняет сообщения. "
-        "После удаления Telegram сообщает ID удалённого "
-        "сообщения, и бот показывает сохранённую версию.\n\n"
+👤 Сохранять автора и ID пользователя.
 
-        "🆔 Поиск ID\n"
-        "/id @username\n"
-        "Можно узнать Telegram ID пользователя.\n\n"
+🆔 Показывать ID пользователей.
 
-        "/id 123456789\n"
-        "Можно проверить ID напрямую.\n\n"
+📋 Вести журнал сообщений.
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
+⚙️ КАК ПОДКЛЮЧИТЬ:
 
-        "🔗 КАК ПОДКЛЮЧИТЬ\n\n"
+1. Добавьте Ceko Hub в группу.
 
-        "1️⃣ Откройте Telegram Business.\n\n"
-        "2️⃣ Откройте раздел подключения ботов.\n\n"
-        "3️⃣ Подключите Ceko Hub.\n\n"
-        "4️⃣ Разрешите боту читать сообщения.\n\n"
-        "5️⃣ Для ответа/изменения сообщений "
-        "разрешите необходимые права.\n\n"
+2. Сделайте бота администратором.
 
-        "После подключения бот начинает получать "
-        "сообщения из управляемых личных чатов.\n\n"
+3. Выдайте ему право читать сообщения
+и управлять сообщениями, если нужна модерация.
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
+4. В BotFather отключите Privacy Mode.
 
-        "⚠️ ВАЖНО\n\n"
+5. После этого бот сможет получать сообщения
+из группы и сохранять их.
 
-        "Секретарь работает только с личными чатами "
-        "Telegram Business.\n\n"
+⚠️ ВАЖНО:
 
-        "Обычные группы этим режимом не отслеживаются.\n\n"
+Управление секретарём происходит через ЛС
+боту, но сам секретарь работает в группах.
 
-        "Бот работает на хостинге, поэтому владелец "
-        "может быть офлайн — бот продолжит работать.\n\n"
+🆔 КОМАНДЫ:
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
+/id
+— отправьте ответом на сообщение пользователя.
 
-        "👤 Уведомления об изменениях и удалениях "
-        "отправляются администратору Ceko."
-    )
+/id @username
+— поиск пользователя, которого бот уже знает.
+
+/secretary
+— открыть эту инструкцию.
+
+/rules
+— показать правила.
+
+✏️ ИЗМЕНЕНИЯ:
+
+Если сообщение изменили, бот отправит администратору:
+
+БЫЛО:
+старый текст
+
+СТАЛО:
+новый текст
+
+👮 Бот сохраняет данные сообщения в SQLite.
+
+🗑 УДАЛЕНИЯ:
+
+Telegram Bot API не отправляет обычному боту
+событие об удалении сообщения.
+
+Поэтому невозможно гарантированно получить
+событие «это сообщение только что удалили».
+
+Но сообщения, которые бот получил заранее,
+сохраняются в журнале.
+"""
 
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🆔 Как работает /id",
-                callback_data="SECRETARY_ID",
+                "📋 Мои подключённые чаты",
+                callback_data="SECRETARY_CHATS"
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="BACK",
+                callback_data="BACK"
             )
-        ],
+        ]
     ])
 
     await safe_edit(
         query,
         text,
-        keyboard,
+        keyboard
     )
 
 
-async def secretary_id_info(query):
+async def secretary_chats(query):
 
-    text = (
-        "🆔 КОМАНДА /ID\n\n"
+    if not is_admin(query.from_user.id):
 
-        "В обычной личке с ботом:\n\n"
-        "/id @username\n\n"
+        await query.answer(
+            "⛔ Только администратор.",
+            show_alert=True
+        )
 
-        "Пример:\n"
-        "/id @netuzu\n\n"
+        return
 
-        "Бот найдёт пользователя в своей базе "
-        "и покажет его ID.\n\n"
+    rows = db.execute(
+        """
+        SELECT chat_id,
+               title,
+               enabled
+        FROM secretary_chats
+        ORDER BY added_at DESC
+        """
+    ).fetchall()
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
+    if not rows:
 
-        "В подключённом Telegram Business-чате:\n\n"
+        text = (
+            "🛡 ПОДКЛЮЧЁННЫЕ ЧАТЫ\n\n"
+            "Пока нет подключённых чатов.\n\n"
+            "Добавьте бота администратором в группу."
+        )
 
-        "/id\n\n"
+    else:
 
-        "Если команда отправлена пользователем "
-        "в управляемом личном чате, бот может "
-        "определить отправителя и показать его ID.\n\n"
+        text = "🛡 ПОДКЛЮЧЁННЫЕ ЧАТЫ\n\n"
 
-        "Также можно использовать:\n\n"
-        "/id 123456789"
-    )
+        for row in rows:
+
+            status = (
+                "🟢"
+                if row["enabled"]
+                else "🔴"
+            )
+
+            text += (
+                f"{status} {row['title'] or 'Без названия'}\n"
+                f"ID: {row['chat_id']}\n\n"
+            )
 
     await safe_edit(
         query,
         text,
-        back_keyboard("SECRETARY"),
+        back_keyboard("SECRETARY")
     )
 
 
 # ============================================================
-# SECRETARY MODE — DATABASE
+# SECRETARY CHAT REGISTRATION
 # ============================================================
 
-def save_business_connection(connection):
+async def register_secretary_chat(
+    update,
+    context
+):
 
-    rights = connection.rights
+    chat = update.effective_chat
 
-    can_reply = int(
-        bool(rights and rights.can_reply)
-    )
+    if not chat:
+        return
 
-    can_read = int(
-        bool(rights and rights.can_read_messages)
-    )
+    if chat.type not in (
+        "group",
+        "supergroup"
+    ):
+        return
 
-    can_delete_sent = int(
-        bool(rights and rights.can_delete_sent_messages)
-    )
+    try:
 
-    can_delete_all = int(
-        bool(rights and rights.can_delete_all_messages)
-    )
-
-    db.execute(
-        """
-        INSERT OR REPLACE INTO business_connections
-        (
-            connection_id,
-            owner_id,
-            owner_username,
-            owner_name,
-            user_chat_id,
-            is_enabled,
-            can_reply,
-            can_read_messages,
-            can_delete_sent_messages,
-            can_delete_all_messages,
-            updated_at
+        db.execute(
+            """
+            INSERT OR REPLACE INTO secretary_chats
+            (
+                chat_id,
+                title,
+                enabled,
+                added_at
+            )
+            VALUES (?, ?, 1, ?)
+            """,
+            (
+                chat.id,
+                chat.title or "",
+                int(time.time())
+            )
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            connection.id,
-            connection.user.id,
-            connection.user.username or "",
-            connection.user.first_name or "",
-            connection.user_chat_id,
-            int(connection.is_enabled),
-            can_reply,
-            can_read,
-            can_delete_sent,
-            can_delete_all,
-            int(time.time()),
-        ),
-    )
 
-    db.commit()
+        db.commit()
+
+    except Exception as error:
+
+        logger.exception(
+            "SECRETARY REGISTER ERROR: %s",
+            error
+        )
 
 
-def get_business_connection(connection_id):
+# ============================================================
+# MESSAGE STORAGE
+# ============================================================
 
-    return db.execute(
-        """
-        SELECT *
-        FROM business_connections
-        WHERE connection_id=?
-        """,
-        (connection_id,),
-    ).fetchone()
+def extract_message_content(message):
+
+    text = message.text or message.caption or ""
+
+    if message.photo:
+        message_type = "photo"
+
+    elif message.video:
+        message_type = "video"
+
+    elif message.document:
+        message_type = "document"
+
+    elif message.voice:
+        message_type = "voice"
+
+    elif message.audio:
+        message_type = "audio"
+
+    elif message.sticker:
+        message_type = "sticker"
+
+    elif message.animation:
+        message_type = "animation"
+
+    else:
+        message_type = "text"
+
+    return text, message_type
 
 
-def save_business_message(message):
+def save_message(message):
 
-    connection_id = message.business_connection_id
-
-    if not connection_id:
+    if not message:
         return
 
     user = message.from_user
 
-    username = ""
-    first_name = ""
-    user_id = None
+    if not user:
+        return
 
-    if user:
-        username = user.username or ""
-        first_name = user.first_name or ""
-        user_id = user.id
-
-    text = message.text or ""
-    caption = message.caption or ""
-
-    if message.text:
-        message_type = "text"
-    elif message.photo:
-        message_type = "photo"
-    elif message.video:
-        message_type = "video"
-    elif message.document:
-        message_type = "document"
-    elif message.voice:
-        message_type = "voice"
-    elif message.audio:
-        message_type = "audio"
-    elif message.sticker:
-        message_type = "sticker"
-    elif message.animation:
-        message_type = "animation"
-    elif message.contact:
-        message_type = "contact"
-    elif message.location:
-        message_type = "location"
-    else:
-        message_type = "other"
+    text, message_type = extract_message_content(
+        message
+    )
 
     db.execute(
         """
-        INSERT OR REPLACE INTO business_messages
+        INSERT OR IGNORE INTO message_log
         (
-            connection_id,
             chat_id,
             message_id,
             user_id,
             username,
             first_name,
             text,
-            caption,
             message_type,
-            created_at
+            created_at,
+            edited_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
         """,
         (
-            connection_id,
-            message.chat_id,
+            message.chat.id,
             message.message_id,
-            user_id,
-            username,
-            first_name,
+            user.id,
+            user.username or "",
+            user.first_name or "",
             text,
-            caption,
             message_type,
-            int(
-                message.date.timestamp()
-                if message.date
-                else time.time()
-            ),
-        ),
+            int(message.date.timestamp())
+            if message.date
+            else int(time.time()),
+        )
     )
 
     db.commit()
 
 
-def get_saved_business_message(
-    connection_id,
+def get_saved_message(
     chat_id,
-    message_id,
+    message_id
 ):
 
     return db.execute(
         """
         SELECT *
-        FROM business_messages
-        WHERE connection_id=?
-        AND chat_id=?
+        FROM message_log
+        WHERE chat_id=?
         AND message_id=?
         """,
         (
-            connection_id,
             chat_id,
-            message_id,
-        ),
+            message_id
+        )
     ).fetchone()
 
 
-def delete_saved_business_message(
-    connection_id,
-    chat_id,
-    message_id,
+# ============================================================
+# SECRETARY MESSAGE LOGGER
+# ============================================================
+
+async def secretary_message_logger(
+    update,
+    context
 ):
 
-    db.execute(
+    message = update.message
+
+    if not message:
+        return
+
+    if message.chat.type not in (
+        "group",
+        "supergroup"
+    ):
+        return
+
+    user = message.from_user
+
+    if not user or user.is_bot:
+        return
+
+    register_chat = db.execute(
         """
-        DELETE FROM business_messages
-        WHERE connection_id=?
-        AND chat_id=?
-        AND message_id=?
+        SELECT 1
+        FROM secretary_chats
+        WHERE chat_id=?
+        AND enabled=1
         """,
-        (
-            connection_id,
-            chat_id,
-            message_id,
-        ),
+        (message.chat.id,)
+    ).fetchone()
+
+    if not register_chat:
+        await register_secretary_chat(
+            update,
+            context
+        )
+
+    save_message(message)
+
+
+# ============================================================
+# EDITED MESSAGE TRACKING
+# ============================================================
+
+async def edited_message_handler(
+    update,
+    context
+):
+
+    message = update.edited_message
+
+    if not message:
+        return
+
+    if message.chat.type not in (
+        "group",
+        "supergroup"
+    ):
+        return
+
+    user = message.from_user
+
+    if not user or user.is_bot:
+        return
+
+    old = get_saved_message(
+        message.chat.id,
+        message.message_id
     )
 
-    db.commit()
+    new_text, new_type = extract_message_content(
+        message
+    )
 
+    # Если старого сообщения нет,
+    # всё равно сохраняем новую версию.
+    if not old:
 
-# ============================================================
-# SECRETARY MODE — CONNECTION
-# ============================================================
-
-async def business_connection(update, context):
-
-    connection = update.business_connection
-
-    if not connection:
-        return
-
-    try:
-
-        save_business_connection(connection)
-
-        owner = connection.user
-
-        status = (
-            "🟢 ПОДКЛЮЧЕН"
-            if connection.is_enabled
-            else "🔴 ОТКЛЮЧЕН"
-        )
-
-        rights = connection.rights
-
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                "🕵️ SECRETARY MODE\n\n"
-                f"Статус: {status}\n\n"
-                f"👤 Владелец: {user_label(owner)}\n"
-                f"🆔 ID: {owner.id}\n\n"
-                "Права:\n"
-                f"💬 Ответы: "
-                f"{'✅' if rights and rights.can_reply else '❌'}\n"
-                f"👁 Чтение: "
-                f"{'✅' if rights and rights.can_read_messages else '❌'}\n"
-                f"🗑 Удаление своих: "
-                f"{'✅' if rights and rights.can_delete_sent_messages else '❌'}\n"
-                f"🗑 Удаление всех: "
-                f"{'✅' if rights and rights.can_delete_all_messages else '❌'}"
-            ),
-        )
-
-    except Exception as error:
-        logger.exception(
-            "BUSINESS CONNECTION ERROR: %s",
-            error,
-        )
-
-
-# ============================================================
-# SECRETARY MODE — NEW BUSINESS MESSAGE
-# ============================================================
-
-async def business_message(update, context):
-
-    message = update.business_message
-
-    if not message:
-        return
-
-    try:
-
-        # Только личные чаты.
-        # Группы/супергруппы/каналы НЕ обрабатываем.
-        if message.chat.type != "private":
-            return
-
-        save_business_message(message)
-
-        user = message.from_user
-
-        # /id в управляемом личном чате
-        if message.text:
-
-            command_match = re.fullmatch(
-                r"\s*/id(?:\s+(.+))?\s*",
-                message.text,
-                flags=re.IGNORECASE,
+        db.execute(
+            """
+            INSERT OR REPLACE INTO message_log
+            (
+                chat_id,
+                message_id,
+                user_id,
+                username,
+                first_name,
+                text,
+                message_type,
+                created_at,
+                edited_at
             )
-
-            if command_match:
-
-                argument = (
-                    command_match.group(1)
-                    or ""
-                ).strip()
-
-                result = await resolve_id(
-                    argument,
-                    user,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                message.chat.id,
+                message.message_id,
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                new_text,
+                new_type,
+                int(
+                    message.date.timestamp()
                 )
-
-                try:
-
-                    await context.bot.edit_message_text(
-                        chat_id=message.chat_id,
-                        message_id=message.message_id,
-                        business_connection_id=(
-                            message.business_connection_id
-                        ),
-                        text=result,
-                    )
-
-                except Exception as error:
-
-                    logger.exception(
-                        "BUSINESS /ID EDIT ERROR: %s",
-                        error,
-                    )
-
-                    try:
-                        await context.bot.send_message(
-                            chat_id=message.chat_id,
-                            text=result,
-                            business_connection_id=(
-                                message.business_connection_id
-                            ),
-                        )
-                    except Exception:
-                        pass
-
-                return
-
-    except Exception as error:
-
-        logger.exception(
-            "BUSINESS MESSAGE ERROR: %s",
-            error,
+                if message.date
+                else int(time.time()),
+                int(time.time())
+            )
         )
 
+        db.commit()
 
-# ============================================================
-# SECRETARY MODE — EDITED BUSINESS MESSAGE
-# ============================================================
+        old_text = "⚠️ Старая версия не была сохранена."
 
-async def edited_business_message(update, context):
+    else:
 
-    message = update.edited_business_message
+        old_text = old["text"] or "(без текста)"
 
-    if not message:
-        return
-
-    try:
-
-        # Только личные чаты.
-        if message.chat.type != "private":
-            return
-
-        old = get_saved_business_message(
-            message.business_connection_id,
-            message.chat_id,
-            message.message_id,
+        db.execute(
+            """
+            UPDATE message_log
+            SET text=?,
+                message_type=?,
+                edited_at=?
+            WHERE chat_id=?
+            AND message_id=?
+            """,
+            (
+                new_text,
+                new_type,
+                int(time.time()),
+                message.chat.id,
+                message.message_id
+            )
         )
 
-        if not old:
-            # Если бот не видел старую версию,
-            # всё равно запоминаем новую.
-            save_business_message(message)
+        db.commit()
+
+    if not is_admin(user.id):
+
+        admin_text = (
+            "✏️ СООБЩЕНИЕ ИЗМЕНЕНО\n\n"
+            f"💬 Чат: {message.chat.title or message.chat.id}\n"
+            f"👤 Пользователь: {user_label(user)}\n"
+            f"🆔 ID: {user.id}\n"
+            f"📨 Message ID: {message.message_id}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "БЫЛО:\n"
+            f"{old_text}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "СТАЛО:\n"
+            f"{new_text or '(без текста)'}"
+        )
+
+        try:
 
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=(
-                    "✏️ СООБЩЕНИЕ ИЗМЕНЕНО\n\n"
-                    f"👤 {user_label(message.from_user)}\n"
-                    f"🆔 ID: "
-                    f"{message.from_user.id if message.from_user else 'Неизвестно'}\n"
-                    f"💬 Чат ID: {message.chat_id}\n\n"
-                    "⚠️ Старую версию бот не успел сохранить.\n\n"
-                    f"Новая версия:\n"
-                    f"{message.text or message.caption or '[медиа]'}"
-                ),
+                text=admin_text
             )
 
-            return
+        except Exception as error:
 
-        old_content = (
-            old["text"]
-            or old["caption"]
-            or f"[{old['message_type']}]"
-        )
-
-        new_content = (
-            message.text
-            or message.caption
-            or f"[{old['message_type']}]"
-        )
-
-        user = message.from_user
-
-        username = (
-            "@" + user.username
-            if user and user.username
-            else "Без username"
-        )
-
-        user_id = (
-            user.id
-            if user
-            else old["user_id"]
-        )
-
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                "✏️ СООБЩЕНИЕ ИЗМЕНЕНО\n\n"
-                f"👤 {username}\n"
-                f"🆔 ID: {user_id}\n"
-                f"💬 Чат ID: {message.chat_id}\n"
-                f"🆔 Message ID: {message.message_id}\n\n"
-                "━━━━━━━━━━━━━━\n\n"
-                "📤 БЫЛО:\n"
-                f"{old_content}\n\n"
-                "📥 СТАЛО:\n"
-                f"{new_content}"
-            ),
-        )
-
-        # Сохраняем уже новую версию.
-        save_business_message(message)
-
-    except Exception as error:
-
-        logger.exception(
-            "EDITED BUSINESS MESSAGE ERROR: %s",
-            error,
-        )
-
-
-# ============================================================
-# SECRETARY MODE — DELETED BUSINESS MESSAGES
-# ============================================================
-
-async def deleted_business_messages(update, context):
-
-    deleted = update.deleted_business_messages
-
-    if not deleted:
-        return
-
-    try:
-
-        # В актуальном PTB у объекта есть chat.
-        chat = deleted.chat
-
-        # Secretary нужен только для private chats.
-        if chat.type != "private":
-            return
-
-        connection_id = (
-            deleted.business_connection_id
-        )
-
-        for message_id in deleted.message_ids:
-
-            old = get_saved_business_message(
-                connection_id,
-                chat.id,
-                message_id,
+            logger.exception(
+                "EDIT ADMIN SEND ERROR: %s",
+                error
             )
-
-            if old:
-
-                username = (
-                    "@" + old["username"]
-                    if old["username"]
-                    else "Без username"
-                )
-
-                content = (
-                    old["text"]
-                    or old["caption"]
-                    or f"[{old['message_type']}]"
-                )
-
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        "🗑️ СООБЩЕНИЕ УДАЛЕНО\n\n"
-                        f"👤 {username}\n"
-                        f"🆔 ID: "
-                        f"{old['user_id'] or 'Неизвестно'}\n"
-                        f"💬 Чат ID: {chat.id}\n"
-                        f"🆔 Message ID: {message_id}\n\n"
-                        "━━━━━━━━━━━━━━\n\n"
-                        "📄 СОХРАНЁННОЕ СООБЩЕНИЕ:\n"
-                        f"{content}"
-                    ),
-                )
-
-                delete_saved_business_message(
-                    connection_id,
-                    chat.id,
-                    message_id,
-                )
-
-            else:
-
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        "🗑️ СООБЩЕНИЕ УДАЛЕНО\n\n"
-                        f"💬 Чат ID: {chat.id}\n"
-                        f"🆔 Message ID: {message_id}\n\n"
-                        "⚠️ Содержимое не было сохранено."
-                    ),
-                )
-
-    except Exception as error:
-
-        logger.exception(
-            "DELETED BUSINESS MESSAGE ERROR: %s",
-            error,
-        )
 
 
 # ============================================================
 # /ID
 # ============================================================
 
-async def resolve_id(argument, sender=None):
-
-    argument = (argument or "").strip()
-
-    # Если просто /id — показать отправителя
-    if not argument:
-
-        if sender:
-
-            username = (
-                "@" + sender.username
-                if sender.username
-                else "Без username"
-            )
-
-            return (
-                "🆔 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ\n\n"
-                f"👤 {username}\n"
-                f"📝 Имя: {sender.first_name or 'Не указано'}\n"
-                f"🆔 ID: {sender.id}"
-            )
-
-        return "❌ Не удалось определить пользователя."
-
-    # Telegram ID
-    if argument.isdigit():
-
-        user_id = int(argument)
-
-        row = db.execute(
-            """
-            SELECT user_id, username, first_name
-            FROM users
-            WHERE user_id=?
-            """,
-            (user_id,),
-        ).fetchone()
-
-        if row:
-
-            username = (
-                "@" + row["username"]
-                if row["username"]
-                else "Без username"
-            )
-
-            return (
-                "🆔 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ\n\n"
-                f"👤 {username}\n"
-                f"📝 Имя: "
-                f"{row['first_name'] or 'Не указано'}\n"
-                f"🆔 ID: {row['user_id']}"
-            )
-
-        return (
-            "🆔 ИНФОРМАЦИЯ\n\n"
-            f"🆔 ID: {user_id}\n\n"
-            "Пользователь ещё не найден в базе Ceko."
-        )
-
-    # Username
-    username = (
-        argument
-        .lstrip("@")
-        .strip()
-        .lower()
-    )
-
-    row = find_user_by_username(username)
-
-    if not row:
-
-        return (
-            "❌ Пользователь не найден в базе.\n\n"
-            "Пользователь должен хотя бы один раз "
-            "взаимодействовать с ботом."
-        )
-
-    return (
-        "🆔 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ\n\n"
-        f"👤 @{row['username'] or 'Без username'}\n"
-        f"📝 Имя: "
-        f"{row['first_name'] or 'Не указано'}\n"
-        f"🆔 ID: {row['user_id']}"
-    )
-
-
-async def id_command(update, context):
+async def id_command(
+    update,
+    context
+):
 
     user = update.effective_user
 
     if not user:
         return
 
-    ensure_user(user)
+    # ========================================================
+    # /id reply
+    # ========================================================
 
-    argument = ""
+    if update.message.reply_to_message:
+
+        target = update.message.reply_to_message.from_user
+
+        if target:
+
+            ensure_user(target)
+
+            username = (
+                f"@{target.username}"
+                if target.username
+                else "нет"
+            )
+
+            await update.message.reply_text(
+                (
+                    "🆔 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ\n\n"
+                    f"👤 Имя: {target.first_name or 'нет'}\n"
+                    f"🔗 Username: {username}\n"
+                    f"🆔 ID: {target.id}"
+                )
+            )
+
+            return
+
+    # ========================================================
+    # /id @username
+    # ========================================================
 
     if context.args:
-        argument = " ".join(
-            context.args
+
+        username = context.args[0]
+
+        row = find_user_by_username(
+            username
         )
 
-    result = await resolve_id(
-        argument,
-        user,
-    )
+        if row:
 
-    try:
+            await update.message.reply_text(
+                (
+                    "🆔 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ\n\n"
+                    f"👤 Имя: {row['first_name'] or 'нет'}\n"
+                    f"🔗 Username: @{row['username']}\n"
+                    f"🆔 ID: {row['user_id']}"
+                )
+            )
 
-        await update.message.edit_text(
-            result
-        )
-
-    except Exception:
+            return
 
         await update.message.reply_text(
-            result
+            "❌ Я ещё не знаю этого пользователя.\n\n"
+            "Если это пользователь группы — "
+            "отправьте /id ответом на его сообщение."
         )
+
+        return
+
+    # ========================================================
+    # /id без аргументов в ЛС
+    # ========================================================
+
+    if update.effective_chat.type == "private":
+
+        await update.message.reply_text(
+            (
+                "🆔 ВАШ ID\n\n"
+                f"👤 {user.first_name or 'Пользователь'}\n"
+                f"🆔 {user.id}\n"
+                f"🔗 Username: "
+                f"@{user.username or 'нет'}"
+            )
+        )
+
+        return
+
+    await update.message.reply_text(
+        "ℹ️ Используйте /id ответом на сообщение пользователя."
+    )
 
 
 # ============================================================
 # PROFILE REMOVED
 # ============================================================
 
-# Профиль полностью убран.
-# Вместо него используется SECRETARY.
+# Вместо PROFILE теперь SECRETARY.
 
 
 # ============================================================
@@ -1277,50 +1148,56 @@ async def user_search_menu(query):
         [
             InlineKeyboardButton(
                 "5",
-                callback_data="GEN|5",
+                callback_data="GEN|5"
             ),
             InlineKeyboardButton(
                 "7",
-                callback_data="GEN|7",
+                callback_data="GEN|7"
             ),
             InlineKeyboardButton(
                 "9",
-                callback_data="GEN|9",
+                callback_data="GEN|9"
             ),
         ],
         [
             InlineKeyboardButton(
                 "🎲 РАНДОМ",
-                callback_data="GEN|RANDOM",
-            ),
+                callback_data="GEN|RANDOM"
+            )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="BACK",
-            ),
-        ],
+                callback_data="BACK"
+            )
+        ]
     ])
 
     if os.path.isfile(USER_SEARCH_PHOTO):
 
-        with open(USER_SEARCH_PHOTO, "rb") as photo:
+        with open(
+            USER_SEARCH_PHOTO,
+            "rb"
+        ) as photo:
 
             await query.message.chat.send_photo(
                 photo=photo,
                 caption=text,
-                reply_markup=keyboard,
+                reply_markup=keyboard
             )
 
     else:
 
         await query.message.chat.send_message(
             text=text,
-            reply_markup=keyboard,
+            reply_markup=keyboard
         )
 
 
-async def generate_username_animated(query, length):
+async def generate_username_animated(
+    query,
+    length
+):
 
     if length == "RANDOM":
         actual_length = random.choice(
@@ -1349,15 +1226,15 @@ async def generate_username_animated(query, length):
         [
             InlineKeyboardButton(
                 "🫆 Заново",
-                callback_data="USER_SEARCH",
+                callback_data="USER_SEARCH"
             )
         ],
         [
             InlineKeyboardButton(
                 "🔰 В главную",
-                callback_data="BACK",
+                callback_data="BACK"
             )
-        ],
+        ]
     ])
 
     await msg.edit_text(
@@ -1365,7 +1242,7 @@ async def generate_username_animated(query, length):
             "🔰Готово сгенерированный юз\n\n"
             f"Юз: @{username}"
         ),
-        reply_markup=keyboard,
+        reply_markup=keyboard
     )
 
 
@@ -1379,33 +1256,33 @@ async def catalog(query):
         [
             InlineKeyboardButton(
                 "1 Деф - 1 Мишка",
-                callback_data="PRODUCT|1|1",
+                callback_data="PRODUCT|1|1"
             )
         ],
         [
             InlineKeyboardButton(
                 "10 Деф - 5 Мишек",
-                callback_data="PRODUCT|10|5",
+                callback_data="PRODUCT|10|5"
             )
         ],
         [
             InlineKeyboardButton(
                 "25 Деф - 10 Мишек",
-                callback_data="PRODUCT|25|10",
+                callback_data="PRODUCT|25|10"
             )
         ],
         [
             InlineKeyboardButton(
                 "50 Деф - 40 Мишек",
-                callback_data="PRODUCT|50|40",
+                callback_data="PRODUCT|50|40"
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="BACK",
+                callback_data="BACK"
             )
-        ],
+        ]
     ])
 
     text = (
@@ -1420,48 +1297,56 @@ async def catalog(query):
 
     if os.path.isfile(CATALOG_PHOTO):
 
-        with open(CATALOG_PHOTO, "rb") as photo:
+        with open(
+            CATALOG_PHOTO,
+            "rb"
+        ) as photo:
 
             await query.message.chat.send_photo(
                 photo=photo,
                 caption=text,
-                reply_markup=keyboard,
+                reply_markup=keyboard
             )
 
     else:
 
         await query.message.chat.send_message(
             text=text,
-            reply_markup=keyboard,
+            reply_markup=keyboard
         )
 
 
-async def product(query, amount, bears):
+async def product(
+    query,
+    amount,
+    bears
+):
 
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
                 "✅ Готово",
-                callback_data=f"PAY|{amount}|{bears}",
+                callback_data=f"PAY|{amount}|{bears}"
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="CATALOG",
+                callback_data="CATALOG"
             )
-        ],
+        ]
     ])
 
     await safe_edit(
         query,
         (
             f"Вы выбрали {amount} Деф очков.\n\n"
-            f"Для того чтобы получить их перейдите в ЛС "
-            f"{ADMIN_USERNAME} и скиньте {bears} Мишек.\n\n"
+            f"Для того чтобы получить их перейдите "
+            f"в ЛС {ADMIN_USERNAME} и скиньте "
+            f"{bears} Мишек.\n\n"
             "После этого нажмите кнопку «Готово»."
         ),
-        keyboard,
+        keyboard
     )
 
 
@@ -1469,7 +1354,7 @@ async def payment(
     query,
     context,
     amount,
-    bears,
+    bears
 ):
 
     user = query.from_user
@@ -1481,7 +1366,7 @@ async def payment(
         (
             "✅ Ваш запрос принят и обрабатывается.\n\n"
             "Подождите несколько минут."
-        ),
+        )
     )
 
     keyboard = InlineKeyboardMarkup([
@@ -1490,7 +1375,7 @@ async def payment(
                 "✅ Подтвердить",
                 callback_data=(
                     f"CONFIRM|{user.id}|{amount}"
-                ),
+                )
             )
         ]
     ])
@@ -1505,7 +1390,7 @@ async def payment(
             f"🧸 Мишек: {bears}\n\n"
             "Проверь оплату."
         ),
-        reply_markup=keyboard,
+        reply_markup=keyboard
     )
 
 
@@ -1513,23 +1398,21 @@ async def confirm_payment(
     query,
     context,
     user_id,
-    amount,
+    amount
 ):
 
-    if not is_admin(
-        query.from_user.id
-    ):
+    if not is_admin(query.from_user.id):
 
         await query.answer(
             "⛔ Только администратор.",
-            show_alert=True,
+            show_alert=True
         )
 
         return
 
     add_balance(
         user_id,
-        amount,
+        amount
     )
 
     await context.bot.send_message(
@@ -1538,16 +1421,15 @@ async def confirm_payment(
             "✅ Администратор проверил оплату "
             "и выдал вам Деф Очки.\n\n"
             f"➕ Получено: {amount} Деф\n"
-            f"💰 Баланс: "
-            f"{get_balance(user_id)} Деф"
-        ),
+            f"💰 Баланс: {get_balance(user_id)} Деф"
+        )
     )
 
     try:
 
         await query.edit_message_text(
-            query.message.text
-            + "\n\n✅ ПОДТВЕРЖДЕНО"
+            query.message.text +
+            "\n\n✅ ПОДТВЕРЖДЕНО"
         )
 
     except Exception:
@@ -1570,7 +1452,7 @@ async def promo(query):
             "🫆 Промокод\n\n"
             "Отправьте промокод сообщением:"
         ),
-        back_keyboard(),
+        back_keyboard()
     )
 
 
@@ -1580,15 +1462,19 @@ def generate_code():
 
         code = "".join(
             random.choices(
-                string.ascii_uppercase
-                + string.digits,
-                k=10,
+                string.ascii_uppercase +
+                string.digits,
+                k=10
             )
         )
 
         exists = db.execute(
-            "SELECT 1 FROM promos WHERE code=?",
-            (code,),
+            """
+            SELECT 1
+            FROM promos
+            WHERE code=?
+            """,
+            (code,)
         ).fetchone()
 
         if not exists:
@@ -1611,14 +1497,14 @@ async def check_def_promo(update):
         FROM promos
         WHERE code=?
         """,
-        (code,),
+        (code,)
     ).fetchone()
 
     if not row:
 
         await update.message.reply_text(
             "❌ Промокод не найден.",
-            reply_markup=back_keyboard(),
+            reply_markup=back_keyboard()
         )
 
         return
@@ -1627,14 +1513,14 @@ async def check_def_promo(update):
 
         await update.message.reply_text(
             "❌ Промокод больше недоступен.",
-            reply_markup=back_keyboard(),
+            reply_markup=back_keyboard()
         )
 
         return
 
     add_balance(
         user.id,
-        row["amount"],
+        row["amount"]
     )
 
     db.execute(
@@ -1643,24 +1529,23 @@ async def check_def_promo(update):
         SET uses=uses-1
         WHERE code=?
         """,
-        (code,),
+        (code,)
     )
 
     db.commit()
 
     user_states.pop(
         user.id,
-        None,
+        None
     )
 
     await update.message.reply_text(
         (
             "🎉 Промокод активирован!\n\n"
             f"➕ Получено: {row['amount']} Деф\n"
-            f"💰 Баланс: "
-            f"{get_balance(user.id)} Деф"
+            f"💰 Баланс: {get_balance(user.id)} Деф"
         ),
-        reply_markup=back_keyboard(),
+        reply_markup=back_keyboard()
     )
 
 
@@ -1674,21 +1559,24 @@ async def order(query):
         [
             InlineKeyboardButton(
                 "1 Деф - 1 Деф Очка",
-                callback_data="ORDER_ONE",
+                callback_data="ORDER_ONE"
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="BACK",
+                callback_data="BACK"
             )
-        ],
+        ]
     ])
 
     await safe_edit(
         query,
-        "👾 Заказать Деф\n\nВыбирай пункт:",
-        keyboard,
+        (
+            "👾 Заказать Деф\n\n"
+            "Выбирай пункт:"
+        ),
+        keyboard
     )
 
 
@@ -1698,15 +1586,15 @@ async def order_one(query):
         [
             InlineKeyboardButton(
                 "✅ Подтвердить",
-                callback_data="ORDER_CONFIRM",
+                callback_data="ORDER_CONFIRM"
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="ORDER",
+                callback_data="ORDER"
             )
-        ],
+        ]
     ])
 
     await safe_edit(
@@ -1714,15 +1602,18 @@ async def order_one(query):
         (
             "👾 Вы выбрали:\n\n"
             "1 Деф - 1 Деф Очка\n\n"
-            "⚠️ После подтверждения 1 Деф "
-            "будет списан с баланса.\n\n"
+            "⚠️ После подтверждения "
+            "1 Деф будет списан с баланса.\n\n"
             "Подтвердить?"
         ),
-        keyboard,
+        keyboard
     )
 
 
-async def order_confirm(query, context):
+async def order_confirm(
+    query,
+    context
+):
 
     user = query.from_user
 
@@ -1730,7 +1621,7 @@ async def order_confirm(query, context):
 
     if not take_balance(
         user.id,
-        1,
+        1
     ):
 
         await safe_edit(
@@ -1739,7 +1630,7 @@ async def order_confirm(query, context):
                 "❌ Недостаточно Деф Очков.\n\n"
                 "Для заказа нужен минимум 1 Деф."
             ),
-            back_keyboard(),
+            back_keyboard()
         )
 
         return
@@ -1750,9 +1641,8 @@ async def order_confirm(query, context):
             "✅ Заказ принят!\n\n"
             "1 Деф списан с баланса.\n"
             "Администратор получил заявку.\n\n"
-            f"💰 Осталось: "
-            f"{get_balance(user.id)} Деф"
-        ),
+            f"💰 Осталось: {get_balance(user.id)} Деф"
+        )
     )
 
     await context.bot.send_message(
@@ -1769,10 +1659,10 @@ async def order_confirm(query, context):
             [
                 InlineKeyboardButton(
                     "💬 Профиль",
-                    url=f"tg://user?id={user.id}",
+                    url=f"tg://user?id={user.id}"
                 )
             ]
-        ]),
+        ])
     )
 
 
@@ -1786,21 +1676,24 @@ async def channel(query):
         [
             InlineKeyboardButton(
                 "💬 Открыть канал",
-                url=CHANNEL_URL,
+                url=CHANNEL_URL
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="BACK",
+                callback_data="BACK"
             )
-        ],
+        ]
     ])
 
     await safe_edit(
         query,
-        "💬 Секрет Тгк\n\nНажмите кнопку ниже:",
-        keyboard,
+        (
+            "💬 Секрет Тгк\n\n"
+            "Нажмите кнопку ниже:"
+        ),
+        keyboard
     )
 
 
@@ -1821,13 +1714,13 @@ async def question(query):
             "Отправьте сообщение любого типа.\n\n"
             "Администратор сможет ответить вам."
         ),
-        back_keyboard(),
+        back_keyboard()
     )
 
 
 async def receive_question(
     update,
-    context,
+    context
 ):
 
     user = update.effective_user
@@ -1841,7 +1734,7 @@ async def receive_question(
                 f"👤 {user_label(user)}\n"
                 f"🆔 {user.id}\n\n"
                 "Ответьте реплаем на сообщение."
-            ),
+            )
         )
 
         question_users[
@@ -1858,19 +1751,19 @@ async def receive_question(
 
         user_states.pop(
             user.id,
-            None,
+            None
         )
 
         await update.message.reply_text(
             "✅ Вопрос отправлен администратору.",
-            reply_markup=back_keyboard(),
+            reply_markup=back_keyboard()
         )
 
     except Exception as error:
 
         logger.exception(
             "QUESTION ERROR: %s",
-            error,
+            error
         )
 
         await update.message.reply_text(
@@ -1879,10 +1772,13 @@ async def receive_question(
 
 
 # ============================================================
-# PENSION GAME
+# PENSION
 # ============================================================
 
-async def pension(update, context):
+async def pension(
+    update,
+    context
+):
 
     user = update.effective_user
 
@@ -1893,11 +1789,13 @@ async def pension(update, context):
 
     row = db.execute(
         """
-        SELECT pension, pension_until, broken
+        SELECT pension,
+               pension_until,
+               broken
         FROM users
         WHERE user_id=?
         """,
-        (user.id,),
+        (user.id,)
     ).fetchone()
 
     now = int(time.time())
@@ -1916,10 +1814,10 @@ async def pension(update, context):
                         "🔨 Восстановить",
                         callback_data=(
                             f"RESTORE|{user.id}"
-                        ),
+                        )
                     )
                 ]
-            ]),
+            ])
         )
 
         return
@@ -1928,7 +1826,7 @@ async def pension(update, context):
 
         await update.message.reply_text(
             (
-                "⏳ Подожди ещё "
+                f"⏳ Подожди ещё "
                 f"{row['pension_until'] - now} секунд."
             )
         )
@@ -1937,20 +1835,21 @@ async def pension(update, context):
 
     value = round(
         float(row["pension"]) + 0.1,
-        1,
+        1
     )
 
     db.execute(
         """
         UPDATE users
-        SET pension=?, pension_until=?
+        SET pension=?,
+            pension_until=?
         WHERE user_id=?
         """,
         (
             value,
             now + PENSION_COOLDOWN,
-            user.id,
-        ),
+            user.id
+        )
     )
 
     db.commit()
@@ -1963,7 +1862,7 @@ async def pension(update, context):
             SET broken=1
             WHERE user_id=?
             """,
-            (user.id,),
+            (user.id,)
         )
 
         db.commit()
@@ -1980,30 +1879,34 @@ async def pension(update, context):
                         "🔨 Восстановить",
                         callback_data=(
                             f"RESTORE|{user.id}"
-                        ),
+                        )
                     )
                 ]
-            ]),
+            ])
         )
 
     else:
 
         await update.message.reply_text(
             (
-                f"{mention(user)} понизил пенсию бабушкам\n\n"
+                f"{mention(user)} понизил "
+                "пенсию бабушкам\n\n"
                 f"Понижено {value:.1f}%"
             ),
-            parse_mode="HTML",
+            parse_mode="HTML"
         )
 
 
-async def restore(query, user_id):
+async def restore(
+    query,
+    user_id
+):
 
     if query.from_user.id != user_id:
 
         await query.answer(
             "❌ Это не ваша база.",
-            show_alert=True,
+            show_alert=True
         )
 
         return
@@ -2014,7 +1917,7 @@ async def restore(query, user_id):
         SET broken=0
         WHERE user_id=?
         """,
-        (user_id,),
+        (user_id,)
     )
 
     db.commit()
@@ -2024,11 +1927,16 @@ async def restore(query, user_id):
     )
 
 
-async def top(update, context):
+async def top(
+    update,
+    context
+):
 
     rows = db.execute(
         """
-        SELECT username, user_id, pension
+        SELECT username,
+               user_id,
+               pension
         FROM users
         WHERE pension>0
         ORDER BY pension DESC
@@ -2048,12 +1956,11 @@ async def top(update, context):
 
         for i, row in enumerate(
             rows,
-            1,
+            1
         ):
 
             name = (
-                "@"
-                + row["username"]
+                "@" + row["username"]
                 if row["username"]
                 else f"ID {row['user_id']}"
             )
@@ -2074,7 +1981,7 @@ async def top(update, context):
 
 async def rules_command(
     update,
-    context,
+    context
 ):
 
     await update.message.reply_text(
@@ -2084,7 +1991,7 @@ async def rules_command(
 
 async def update_rules_command(
     update,
-    context,
+    context
 ):
 
     if not is_admin(
@@ -2097,41 +2004,46 @@ async def update_rules_command(
     new_rules = re.sub(
         r"(?is)^\s*обн\s+правила\s*",
         "",
-        text,
+        text
     ).strip()
 
     if not new_rules:
 
         await update.message.reply_text(
-            (
-                "❌ Напишите новый текст "
-                "после «Обн правила»."
-            )
+            "❌ Напишите новый текст после «Обн правила»."
         )
 
         return
 
-    set_rules(new_rules)
+    set_rules(
+        new_rules
+    )
 
     await update.message.reply_text(
         "✅ Правила успешно обновлены!"
     )
 
 
+# ============================================================
+# NEW MEMBERS
+# ============================================================
+
 async def new_member(
     update,
-    context,
+    context
 ):
 
     message = update.message
 
-    if not message or not message.new_chat_members:
+    if not message:
         return
 
     for user in message.new_chat_members:
 
         if user.is_bot:
             continue
+
+        ensure_user(user)
 
         await message.reply_text(
             (
@@ -2140,12 +2052,12 @@ async def new_member(
                 "Чтобы посмотреть правила напиши:\n"
                 "правила"
             ),
-            parse_mode="HTML",
+            parse_mode="HTML"
         )
 
 
 # ============================================================
-# GROUP MODERATION
+# MODERATION
 # ============================================================
 
 LINK_PATTERN = (
@@ -2163,7 +2075,7 @@ LINK_PATTERN = (
 
 async def group_chat(
     update,
-    context,
+    context
 ):
 
     message = update.message
@@ -2181,12 +2093,12 @@ async def group_chat(
     if re.fullmatch(
         r"\s*правила\s*",
         text,
-        flags=re.IGNORECASE,
+        flags=re.IGNORECASE
     ):
 
         await rules_command(
             update,
-            context,
+            context
         )
 
         return
@@ -2194,7 +2106,7 @@ async def group_chat(
     if re.search(
         LINK_PATTERN,
         text,
-        flags=re.IGNORECASE,
+        flags=re.IGNORECASE
     ):
 
         if is_admin(user.id):
@@ -2213,24 +2125,24 @@ async def group_chat(
                 permissions=ChatPermissions(
                     can_send_messages=False
                 ),
-                until_date=int(time.time()) + 3600,
+                until_date=int(time.time()) + 3600
             )
 
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=(
-                    f"{mention(user)} "
-                    "был замучен на 1 час\n"
+                    f"{mention(user)} был замучен "
+                    "на 1 час\n"
                     "Причина: реклама"
                 ),
-                parse_mode="HTML",
+                parse_mode="HTML"
             )
 
         except Exception as error:
 
             logger.exception(
                 "MUTE ERROR: %s",
-                error,
+                error
             )
 
         return
@@ -2238,7 +2150,7 @@ async def group_chat(
     if re.search(
         r"(?<![а-яёa-z0-9])бот(?![а-яёa-z0-9])",
         text,
-        flags=re.IGNORECASE,
+        flags=re.IGNORECASE
     ):
 
         await message.reply_text(
@@ -2252,7 +2164,7 @@ async def group_chat(
 
 async def random_jerry(
     update,
-    context,
+    context
 ):
 
     if not update.message:
@@ -2266,14 +2178,16 @@ async def random_jerry(
     if random.random() > 0.01:
         return
 
-    if not os.path.isfile(JERRY_VIDEO):
+    if not os.path.isfile(
+        JERRY_VIDEO
+    ):
         return
 
     try:
 
         with open(
             JERRY_VIDEO,
-            "rb",
+            "rb"
         ) as video:
 
             await update.message.reply_video(
@@ -2285,60 +2199,12 @@ async def random_jerry(
 
 
 # ============================================================
-# CHANNEL AUTO REPLY
-# ============================================================
-
-CHANNEL_RULES_TEXT = (
-    "💬Здраствуйте Посетители этого чата\n"
-    "Прошу вас не нарушать правила а именно\n"
-    "Оск родни -\n"
-    "Пиар чатов или тгк -\n"
-    "Писать типо я тебя сватну или доксну -\n"
-    "Общайтесь с матами приколами или чем то Ешё "
-    "ну без всего этого что я перечислил 👆"
-)
-
-
-async def channel_auto_reply(
-    update,
-    context,
-):
-
-    message = update.message
-
-    if not message:
-        return
-
-    if not message.is_automatic_forward:
-        return
-
-    if message.date:
-
-        age = (
-            time.time()
-            - message.date.timestamp()
-        )
-
-        if age > 10:
-            return
-
-    try:
-
-        await message.reply_text(
-            CHANNEL_RULES_TEXT
-        )
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# PRIVATE MESSAGE ROUTER
+# PRIVATE ROUTER
 # ============================================================
 
 async def private_message_router(
     update,
-    context,
+    context
 ):
 
     user = update.effective_user
@@ -2366,7 +2232,7 @@ async def private_message_router(
 
         await receive_question(
             update,
-            context,
+            context
         )
 
         return
@@ -2396,7 +2262,7 @@ async def private_message_router(
 
 async def admin_reply(
     update,
-    context,
+    context
 ):
 
     if not is_admin(
@@ -2406,7 +2272,10 @@ async def admin_reply(
 
     message = update.message
 
-    if not message or not message.reply_to_message:
+    if (
+        not message
+        or not message.reply_to_message
+    ):
         return
 
     target_user = question_users.get(
@@ -2443,27 +2312,27 @@ def admin_keyboard():
         [
             InlineKeyboardButton(
                 "➕ Создать промокод Деф",
-                callback_data="ADMIN_CREATE_DEF",
+                callback_data="ADMIN_CREATE_DEF"
             )
         ],
         [
             InlineKeyboardButton(
                 "📊 Статистика",
-                callback_data="ADMIN_STATS",
+                callback_data="ADMIN_STATS"
             )
         ],
         [
             InlineKeyboardButton(
                 "👥 Пользователи",
-                callback_data="ADMIN_USERS",
+                callback_data="ADMIN_USERS"
             )
         ],
         [
             InlineKeyboardButton(
                 "◀️ Назад",
-                callback_data="BACK",
+                callback_data="BACK"
             )
-        ],
+        ]
     ])
 
 
@@ -2475,7 +2344,7 @@ async def admin(query):
 
         await query.answer(
             "⛔ Нет доступа.",
-            show_alert=True,
+            show_alert=True
         )
 
         return
@@ -2486,7 +2355,7 @@ async def admin(query):
             "🔐 Панель администратора\n\n"
             "Выберите действие:"
         ),
-        admin_keyboard(),
+        admin_keyboard()
     )
 
 
@@ -2511,10 +2380,10 @@ async def admin_create_def(query):
         query,
         (
             "➕ Создание промокода Деф\n\n"
-            "Напишите сколько Деф будет выдавать "
-            "промокод."
+            "Напишите сколько Деф будет "
+            "выдавать промокод."
         ),
-        back_keyboard("ADMIN"),
+        back_keyboard("ADMIN")
     )
 
 
@@ -2551,10 +2420,7 @@ async def admin_amount(update):
     ] = "PROMO_USES"
 
     await update.message.reply_text(
-        (
-            "Теперь напишите количество "
-            "использований промокода."
-        )
+        "Теперь напишите количество использований промокода."
     )
 
 
@@ -2591,22 +2457,22 @@ async def admin_uses(update):
             "📋 Проверьте:\n\n"
             f"💰 Деф: {admin_data['amount']}\n"
             f"👥 Использований: {uses}\n\n"
-            "Нажмите «Создать» в панели."
+            "Нажмите «Создать»."
         ),
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
                     "✅ Создать",
-                    callback_data="ADMIN_CONFIRM_DEF",
+                    callback_data="ADMIN_CONFIRM_DEF"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "❌ Отмена",
-                    callback_data="ADMIN",
+                    callback_data="ADMIN"
                 )
-            ],
-        ]),
+            ]
+        ])
     )
 
 
@@ -2625,7 +2491,7 @@ async def admin_confirm_def(query):
         await safe_edit(
             query,
             "❌ Данные создания промокода потеряны.",
-            admin_keyboard(),
+            admin_keyboard()
         )
 
         return
@@ -2634,14 +2500,18 @@ async def admin_confirm_def(query):
 
     db.execute(
         """
-        INSERT INTO promos(code, amount, uses)
+        INSERT INTO promos(
+            code,
+            amount,
+            uses
+        )
         VALUES (?, ?, ?)
         """,
         (
             code,
             admin_data["amount"],
-            admin_data["uses"],
-        ),
+            admin_data["uses"]
+        )
     )
 
     db.commit()
@@ -2653,7 +2523,7 @@ async def admin_confirm_def(query):
 
     user_states.pop(
         query.from_user.id,
-        None,
+        None
     )
 
     await safe_edit(
@@ -2664,7 +2534,7 @@ async def admin_confirm_def(query):
             f"💰 {amount} Деф\n"
             f"👥 Использований: {uses}"
         ),
-        admin_keyboard(),
+        admin_keyboard()
     )
 
 
@@ -2680,32 +2550,41 @@ async def admin_stats(query):
         return
 
     users = db.execute(
-        "SELECT COUNT(*) AS c FROM users"
+        """
+        SELECT COUNT(*) AS c
+        FROM users
+        """
     ).fetchone()["c"]
 
     total = db.execute(
         """
-        SELECT COALESCE(SUM(balance),0) AS s
+        SELECT COALESCE(
+            SUM(balance),
+            0
+        ) AS s
         FROM users
         """
     ).fetchone()["s"]
 
     promos = db.execute(
-        "SELECT COUNT(*) AS c FROM promos"
-    ).fetchone()["c"]
-
-    business = db.execute(
         """
         SELECT COUNT(*) AS c
-        FROM business_connections
-        WHERE is_enabled=1
+        FROM promos
         """
     ).fetchone()["c"]
 
     messages = db.execute(
         """
         SELECT COUNT(*) AS c
-        FROM business_messages
+        FROM message_log
+        """
+    ).fetchone()["c"]
+
+    chats = db.execute(
+        """
+        SELECT COUNT(*) AS c
+        FROM secretary_chats
+        WHERE enabled=1
         """
     ).fetchone()["c"]
 
@@ -2715,13 +2594,17 @@ async def admin_stats(query):
             "📊 СТАТИСТИКА\n\n"
             f"👥 Пользователей: {users}\n"
             f"💰 Деф на балансах: {total}\n"
-            f"🎟 Промокодов Деф: {promos}\n\n"
-            f"🕵️ Business подключений: {business}\n"
-            f"💾 Сохранённых сообщений: {messages}"
+            f"🎟 Промокодов: {promos}\n"
+            f"🗃 Сохранённых сообщений: {messages}\n"
+            f"🛡 Чатов секретаря: {chats}"
         ),
-        admin_keyboard(),
+        admin_keyboard()
     )
 
+
+# ============================================================
+# ADMIN USERS
+# ============================================================
 
 async def admin_users(query):
 
@@ -2732,7 +2615,10 @@ async def admin_users(query):
 
     users = db.execute(
         """
-        SELECT user_id, username, first_name, balance
+        SELECT user_id,
+               username,
+               first_name,
+               balance
         FROM users
         ORDER BY balance DESC
         LIMIT 20
@@ -2745,7 +2631,7 @@ async def admin_users(query):
 
     for i, user in enumerate(
         users,
-        1,
+        1
     ):
 
         name = (
@@ -2754,15 +2640,18 @@ async def admin_users(query):
             or f"ID {user['user_id']}"
         )
 
+        if user["username"]:
+            name = "@" + name
+
         text += (
-            f"{i}. {name} - "
+            f"{i}. {name} — "
             f"{user['balance']} Деф\n"
         )
 
     await safe_edit(
         query,
         text,
-        admin_keyboard(),
+        admin_keyboard()
     )
 
 
@@ -2772,7 +2661,7 @@ async def admin_users(query):
 
 async def callback_handler(
     update,
-    context,
+    context
 ):
 
     query = update.callback_query
@@ -2789,16 +2678,14 @@ async def callback_handler(
 
     try:
 
+        # MAIN
         if data == "BACK":
 
             await main_menu(query)
 
             return
 
-        # ----------------------------------------------------
         # SECRETARY
-        # ----------------------------------------------------
-
         if data == "SECRETARY":
 
             await secretary_menu(
@@ -2807,18 +2694,15 @@ async def callback_handler(
 
             return
 
-        if data == "SECRETARY_ID":
+        if data == "SECRETARY_CHATS":
 
-            await secretary_id_info(
+            await secretary_chats(
                 query
             )
 
             return
 
-        # ----------------------------------------------------
         # USER SEARCH
-        # ----------------------------------------------------
-
         if data == "USER_SEARCH":
 
             await user_search_menu(
@@ -2827,40 +2711,45 @@ async def callback_handler(
 
             return
 
-        if data.startswith("GEN|"):
+        if data.startswith(
+            "GEN|"
+        ):
 
             length = data.split("|")[1]
 
             await generate_username_animated(
                 query,
-                length,
+                length
             )
 
             return
 
-        # ----------------------------------------------------
         # CATALOG
-        # ----------------------------------------------------
-
         if data == "CATALOG":
 
-            await catalog(query)
+            await catalog(
+                query
+            )
 
             return
 
-        if data.startswith("PRODUCT|"):
+        if data.startswith(
+            "PRODUCT|"
+        ):
 
             parts = data.split("|")
 
             await product(
                 query,
                 int(parts[1]),
-                int(parts[2]),
+                int(parts[2])
             )
 
             return
 
-        if data.startswith("PAY|"):
+        if data.startswith(
+            "PAY|"
+        ):
 
             parts = data.split("|")
 
@@ -2868,12 +2757,14 @@ async def callback_handler(
                 query,
                 context,
                 int(parts[1]),
-                int(parts[2]),
+                int(parts[2])
             )
 
             return
 
-        if data.startswith("CONFIRM|"):
+        if data.startswith(
+            "CONFIRM|"
+        ):
 
             parts = data.split("|")
 
@@ -2881,25 +2772,19 @@ async def callback_handler(
                 query,
                 context,
                 int(parts[1]),
-                int(parts[2]),
+                int(parts[2])
             )
 
             return
 
-        # ----------------------------------------------------
         # PROMO
-        # ----------------------------------------------------
-
         if data == "PROMO":
 
             await promo(query)
 
             return
 
-        # ----------------------------------------------------
         # ORDER
-        # ----------------------------------------------------
-
         if data == "ORDER":
 
             await order(query)
@@ -2916,35 +2801,26 @@ async def callback_handler(
 
             await order_confirm(
                 query,
-                context,
+                context
             )
 
             return
 
-        # ----------------------------------------------------
         # CHANNEL
-        # ----------------------------------------------------
-
         if data == "CHANNEL":
 
             await channel(query)
 
             return
 
-        # ----------------------------------------------------
         # QUESTION
-        # ----------------------------------------------------
-
         if data == "QUESTION":
 
             await question(query)
 
             return
 
-        # ----------------------------------------------------
         # BALANCE
-        # ----------------------------------------------------
-
         if data == "BALANCE":
 
             await query.answer(
@@ -2952,30 +2828,24 @@ async def callback_handler(
                     f"💰 Баланс: "
                     f"{get_balance(query.from_user.id)} Деф"
                 ),
-                show_alert=True,
+                show_alert=True
             )
 
             return
 
-        # ----------------------------------------------------
         # RESTORE
-        # ----------------------------------------------------
-
-        if data.startswith("RESTORE|"):
+        if data.startswith(
+            "RESTORE|"
+        ):
 
             await restore(
                 query,
-                int(
-                    data.split("|")[1]
-                ),
+                int(data.split("|")[1])
             )
 
             return
 
-        # ----------------------------------------------------
         # ADMIN
-        # ----------------------------------------------------
-
         if data == "ADMIN":
 
             await admin(query)
@@ -3014,23 +2884,18 @@ async def callback_handler(
 
             return
 
-        logger.warning(
-            "UNKNOWN CALLBACK: %s",
-            data,
-        )
-
     except Exception as error:
 
         logger.exception(
             "CALLBACK ERROR: %s",
-            error,
+            error
         )
 
         try:
 
             await query.answer(
                 "❌ Ошибка обработки кнопки.",
-                show_alert=True,
+                show_alert=True
             )
 
         except Exception:
@@ -3043,23 +2908,23 @@ async def callback_handler(
 
 async def lowerpension_command(
     update,
-    context,
+    context
 ):
 
     await pension(
         update,
-        context,
+        context
     )
 
 
 async def top_command(
     update,
-    context,
+    context
 ):
 
     await top(
         update,
-        context,
+        context
     )
 
 
@@ -3069,12 +2934,12 @@ async def top_command(
 
 async def error_handler(
     update,
-    context,
+    context
 ):
 
     logger.exception(
         "BOT ERROR",
-        exc_info=context.error,
+        exc_info=context.error
     )
 
 
@@ -3084,156 +2949,157 @@ async def error_handler(
 
 def main():
 
+    if TOKEN.startswith(
+        "ВСТАВЬ_"
+    ):
+
+        print(
+            "❌ Вставьте новый токен в TOKEN."
+        )
+
+        return
+
     application = (
         Application.builder()
         .token(TOKEN)
         .build()
     )
 
-    # --------------------------------------------------------
-    # START
-    # --------------------------------------------------------
+    # ========================================================
+    # COMMANDS
+    # ========================================================
 
     application.add_handler(
         CommandHandler(
             "start",
-            start,
+            start
         ),
-        group=0,
+        group=0
     )
-
-    # --------------------------------------------------------
-    # /ID
-    # --------------------------------------------------------
 
     application.add_handler(
         CommandHandler(
             "id",
-            id_command,
+            id_command
         ),
-        group=0,
+        group=0
     )
 
-    # --------------------------------------------------------
-    # OTHER COMMANDS
-    # --------------------------------------------------------
+    application.add_handler(
+        CommandHandler(
+            "secretary",
+            lambda update, context:
+                secretary_command(
+                    update,
+                    context
+                )
+        ),
+        group=0
+    )
 
     application.add_handler(
         CommandHandler(
             "lowerpension",
-            lowerpension_command,
+            lowerpension_command
         ),
-        group=0,
+        group=0
     )
 
     application.add_handler(
         CommandHandler(
             "top",
-            top_command,
+            top_command
         ),
-        group=0,
+        group=0
     )
 
-    # --------------------------------------------------------
-    # CALLBACKS
-    # --------------------------------------------------------
+    application.add_handler(
+        CommandHandler(
+            "rules",
+            rules_command
+        ),
+        group=0
+    )
+
+    # ========================================================
+    # EDITED MESSAGE
+    # ========================================================
+
+    application.add_handler(
+        MessageHandler(
+            filters.UpdateType.EDITED_MESSAGE
+            & filters.ChatType.GROUPS,
+            edited_message_handler
+        ),
+        group=1
+    )
+
+    # ========================================================
+    # BUTTONS
+    # ========================================================
 
     application.add_handler(
         CallbackQueryHandler(
             callback_handler
         ),
-        group=0,
+        group=2
     )
 
-    # --------------------------------------------------------
-    # BUSINESS CONNECTION
-    # --------------------------------------------------------
-
-    application.add_handler(
-        BusinessConnectionHandler(
-            business_connection,
-        ),
-        group=0,
-    )
-
-    # --------------------------------------------------------
-    # NEW BUSINESS MESSAGE
-    # Только личные чаты фильтруются внутри функции.
-    # --------------------------------------------------------
-
-    application.add_handler(
-        MessageHandler(
-            filters.UpdateType.BUSINESS_MESSAGE,
-            business_message,
-        ),
-        group=1,
-    )
-
-    # --------------------------------------------------------
-    # EDITED BUSINESS MESSAGE
-    # --------------------------------------------------------
-
-    application.add_handler(
-        MessageHandler(
-            filters.UpdateType.EDITED_BUSINESS_MESSAGE,
-            edited_business_message,
-        ),
-        group=1,
-    )
-
-    # --------------------------------------------------------
-    # DELETED BUSINESS MESSAGE
-    # --------------------------------------------------------
-
-    application.add_handler(
-        BusinessMessagesDeletedHandler(
-            deleted_business_messages,
-        ),
-        group=1,
-    )
-
-    # --------------------------------------------------------
+    # ========================================================
     # NEW MEMBERS
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
             filters.StatusUpdate.NEW_CHAT_MEMBERS,
-            new_member,
+            new_member
         ),
-        group=2,
+        group=3
     )
 
-    # --------------------------------------------------------
+    # ========================================================
+    # SECRETARY MESSAGE LOG
+    # ========================================================
+
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS
+            & ~filters.COMMAND,
+            secretary_message_logger
+        ),
+        group=4
+    )
+
+    # ========================================================
     # ADMIN REPLIES
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE
             & filters.REPLY
             & filters.ALL,
-            admin_reply,
+            admin_reply
         ),
-        group=3,
+        group=5
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PRIVATE ROUTER
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE
             & ~filters.COMMAND,
-            private_message_router,
+            private_message_router
         ),
-        group=5,
+        group=6
     )
 
-    # --------------------------------------------------------
-    # RULES
-    # --------------------------------------------------------
+    # ========================================================
+    # UPDATE RULES
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
@@ -3242,14 +3108,14 @@ def main():
             & filters.Regex(
                 r"(?is)^\s*обн\s+правила\b"
             ),
-            update_rules_command,
+            update_rules_command
         ),
-        group=6,
+        group=7
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PENSION
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
@@ -3258,9 +3124,9 @@ def main():
             & filters.Regex(
                 r"(?i)^\s*ппб\s*$"
             ),
-            pension,
+            pension
         ),
-        group=7,
+        group=8
     )
 
     application.add_handler(
@@ -3270,9 +3136,9 @@ def main():
             & filters.Regex(
                 r"(?i)^\s*понизить пенсию бабушкам\s*$"
             ),
-            pension,
+            pension
         ),
-        group=7,
+        group=8
     )
 
     application.add_handler(
@@ -3282,49 +3148,37 @@ def main():
             & filters.Regex(
                 r"(?i)^\s*топ\s*$"
             ),
-            top,
+            top
         ),
-        group=7,
+        group=8
     )
 
-    # --------------------------------------------------------
-    # GROUP MODERATION
-    # --------------------------------------------------------
+    # ========================================================
+    # MODERATION
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS
             & filters.TEXT
             & ~filters.COMMAND,
-            group_chat,
+            group_chat
         ),
-        group=10,
+        group=10
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # JERRY
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS
             & filters.TEXT
             & ~filters.COMMAND,
-            random_jerry,
+            random_jerry
         ),
-        group=11,
-    )
-
-    # --------------------------------------------------------
-    # CHANNEL AUTO REPLY
-    # --------------------------------------------------------
-
-    application.add_handler(
-        MessageHandler(
-            filters.ALL,
-            channel_auto_reply,
-        ),
-        group=12,
+        group=11
     )
 
     application.add_error_handler(
@@ -3342,17 +3196,20 @@ def main():
     )
     print(
         "ADMINS:",
-        ADMIN_IDS,
+        ADMIN_IDS
     )
     print(
         "DATABASE:",
-        DB_FILE,
+        DB_FILE
     )
     print(
-        "SECRETARY MODE: ENABLED"
+        "SECRETARY: ENABLED"
     )
     print(
-        "SECRETARY: PRIVATE BUSINESS CHATS ONLY"
+        "EDIT TRACKING: ENABLED"
+    )
+    print(
+        "MESSAGE LOG: ENABLED"
     )
     print(
         "========================================"
@@ -3360,9 +3217,69 @@ def main():
 
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
+        drop_pending_updates=True
     )
 
+
+# ============================================================
+# SECRETARY COMMAND
+# ============================================================
+
+async def secretary_command(
+    update,
+    context
+):
+
+    text = """🛡 СЕКРЕТАРЬ CEKO HUB
+
+Секретарь работает в подключённых группах.
+
+Чтобы подключить:
+
+1️⃣ Добавьте бота в группу.
+
+2️⃣ Выдайте ему права администратора.
+
+3️⃣ Отключите Privacy Mode у бота через BotFather.
+
+4️⃣ После этого бот начнёт получать сообщения.
+
+📋 Возможности:
+
+✏️ Отслеживание изменений сообщений.
+
+🗃 Сохранение сообщений.
+
+👤 Определение автора.
+
+🆔 Определение ID.
+
+📊 Журнал сообщений.
+
+Команды:
+
+/id
+/id @username
+/secretary
+/rules
+
+⚠️ Telegram не передаёт обычным ботам
+событие удаления сообщения. Поэтому
+100% определить удаление после факта
+через Bot API невозможно.
+
+При этом полученные сообщения сохраняются
+в базе заранее."""
+    
+    await update.message.reply_text(
+        text,
+        reply_markup=back_keyboard()
+    )
+
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
     main()
