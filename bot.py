@@ -26,7 +26,7 @@ from telegram.ext import (
 # CEKO HUB — FULL BOT
 # ============================================================
 
-TOKEN = "ВСТАВЬ_НОВЫЙ_ТОКЕН_ОТ_BOTFATHER"
+TOKEN = "8905175157:AAEXGCH_Cx2On1uH0JMuBoEuxDB3I2F52N0"
 
 # ============================================================
 # ADMINS
